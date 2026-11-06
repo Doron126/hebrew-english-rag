@@ -1,0 +1,40 @@
+# Local configuration and credentials
+.env
+env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+
+# User documents, tenants, indexes, conversations, and logs
+/data/
+/storage/
+/config/tenants/
+/logs/
+/backups/
+/exports/
+*.sqlite
+*.sqlite3
+*.db
+*.db-wal
+*.db-shm
+*.log
+
+# Models and generated runtime files
+*.gguf
+/models/
+/.cache/
+/.venv/
+/venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/

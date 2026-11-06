@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<meta name="theme-color" content="#faf9f6"/>
+<meta name="description" content="Search documents and ask questions with source citations."/>
+<title>Hebrew-English RAG Application · Document workspace</title>
+<link rel="stylesheet" href="./workspace.css?v=d8ba178ab83a"/>
+</head>
+<body class="app-body">
+<a class="skip-link" href="#chat-input">Skip to question box</a>
+
+<div id="app-shell">
+  <nav id="sidebar" aria-label="Conversation workspace">
+    <div class="sidebar-brand" aria-label="Hebrew-English RAG Application knowledge assistant">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <div class="brand-copy">
+        <div class="brand-name">Hebrew-English RAG Application</div>
+      </div>
+      <button type="button" id="sidebar-collapse-btn" aria-label="Collapse navigation" title="Collapse navigation"><svg class="ui-icon" aria-hidden="true" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M10 4v16"/></svg></button>
+      <button type="button" id="sidebar-close-btn" aria-label="Close navigation"><svg class="ui-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+    </div>
+
+    <button type="button" id="new-thread-btn">
+      <span>New conversation</span>
+      <span class="new-thread-icon" aria-hidden="true">
+        <svg class="ui-icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+      </span>
+    </button>
+
+    <div class="workspace-section-heading" id="conversations-heading">Conversations</div>
+    <section id="conversation-navigation" aria-labelledby="conversations-heading">
+    <label class="thread-search-shell" for="thread-search">
+      <span class="sr-only">Search conversations</span>
+      <svg class="ui-icon" aria-hidden="true" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg>
+      <input id="thread-search" type="search" autocomplete="off" placeholder="Search conversations"/>
+      <button type="button" id="thread-search-clear" class="hidden" aria-label="Clear conversation search">
+        <svg class="ui-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="m8 8 8 8M16 8l-8 8"/></svg>
+      </button>
+    </label>
+
+    <div id="thread-list" aria-label="Saved conversations"></div>
+
+    </section>
+    <div id="document-inventory" hidden></div>
+
+    <div class="sidebar-footer">
+      <div class="tenant-card">
+        <div id="tenant-display" dir="auto">Default workspace</div>
+      </div>
+      <div class="utility-row">
+        <button type="button" id="settings-open-btn" class="utility-button">
+          <svg class="ui-icon" aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21h-4v-.08A1.7 1.7 0 0 0 8.96 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.56-1.03H3v-4h.08A1.7 1.7 0 0 0 4.6 8.94a1.7 1.7 0 0 0-.34-1.88L4.2 7l2.83-2.83.06.06a1.7 1.7 0 0 0 1.88.34A1.7 1.7 0 0 0 10 3.01V3h4v.08a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.88-.34l.06-.06L19.8 7l-.06.06a1.7 1.7 0 0 0-.34 1.88A1.7 1.7 0 0 0 20.96 10H21v4h-.08A1.7 1.7 0 0 0 19.4 15Z"/></svg>
+          <span>Settings</span>
+        </button>
+        <button type="button" id="help-open-btn" class="utility-button">
+          <svg class="ui-icon" aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.7 9a2.45 2.45 0 1 1 3.5 2.22c-.78.4-1.2.9-1.2 1.78M12 17h.01"/></svg>
+          <span>Help &amp; about</span>
+        </button>
+      </div>
+    </div>
+  </nav>
+
+  <button type="button" id="sidebar-backdrop" aria-label="Close conversation menu" tabindex="-1"></button>
+
+  <main id="app-main">
+    <header id="topbar">
+      <button type="button" id="mobile-menu-btn" aria-label="Open conversation menu" aria-controls="sidebar" aria-expanded="false">
+        <svg class="ui-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
+      <div class="topbar-title-group">
+        <h1 id="thread-title" dir="auto">New conversation</h1>
+      </div>
+      <div class="topbar-actions">
+        <div class="backend-control">
+          <label class="backend-label" for="chat-backend">Answer model</label>
+          <span id="answer-model-name">Gemma 4 31B</span>
+          <input id="chat-backend" type="hidden" value="gemma">
+          <span id="model-state" role="status" aria-live="polite">Checking selected model…</span>
+          <button type="button" id="model-retry" hidden>Retry selected model</button>
+          <details id="model-diagnostic-details" hidden><summary>Technical details</summary><pre id="model-diagnostics"></pre></details>
+        </div>
+        <button type="button" id="language-toggle" lang="en" aria-label="Switch to English">EN</button>
+        <button type="button" id="export-thread-btn" class="topbar-tool" aria-label="Export conversation as Markdown" title="Export conversation as Markdown" disabled>
+          <svg class="ui-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3v12M7.5 10.5 12 15l4.5-4.5M5 20h14"/></svg>
+          <span class="topbar-tool-label">Export</span>
+        </button>
+        <button type="button" id="sources-toggle-btn" class="topbar-tool" aria-label="Conversation source index retired; evidence is shown with each answer" aria-controls="source-panel" aria-expanded="false" title="Evidence is shown with each answer" disabled hidden>
+          <svg class="ui-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M5 4.5h11a2 2 0 0 1 2 2V20H7a2 2 0 0 1-2-2V4.5Z"/><path d="M7 17.5h11M9 8h5M9 11.5h6"/></svg>
+          <span class="topbar-tool-label">Sources</span>
+          <span id="sources-count-badge" class="tool-badge hidden">0</span>
+        </button>
+        <button type="button" id="connection-status-button" data-status="unknown" aria-label="Check backend connection" title="Check backend connection">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span id="connection-status-label" class="connection-status-label">Not checked</span>
+        </button>
+      </div>
+    </header>
+
+    <section id="conversation-stage" aria-label="Knowledge assistant conversation">
+      <header id="chat-header">
+        <div class="welcome-content">
+
+          <div class="welcome-badge">
+            <svg class="ui-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="m12 3 1.45 4.05L17.5 8.5l-4.05 1.45L12 14l-1.45-4.05L6.5 8.5l4.05-1.45L12 3ZM18.5 14l.82 2.18L21.5 17l-2.18.82L18.5 20l-.82-2.18L15.5 17l2.18-.82L18.5 14Z"/></svg>
+            Your document workspace
+          </div>
+          <h2 id="welcome-title">A clearer view of your documents.</h2>
+          <p class="welcome-lede">Ask, compare and explore your documents in Hebrew or English. Follow source links back to the original pages.</p>
+
+<div id="starter-prompts" class="starter-grid" aria-label="Example questions">
+            <button type="button" class="starter-card" data-prompt="Summarize the main findings in the available documents and cite the strongest evidence.">
+              <span class="starter-icon" aria-hidden="true"><svg class="ui-icon" viewBox="0 0 24 24"><path d="M7 3h7l4 4v14H7zM14 3v5h5M10 12h5M10 16h5"/></svg></span>
+              <span class="starter-card-copy"><span class="starter-card-title">Summarize a document</span><span class="starter-card-description">Get the main findings with source citations.</span></span>
+              <span class="starter-arrow" aria-hidden="true">↗</span>
+            </button>
+            <button type="button" class="starter-card" data-prompt="Compare the relevant sources. Explain where they agree, where they differ, and which source provides the strongest support.">
+              <span class="starter-icon" aria-hidden="true"><svg class="ui-icon" viewBox="0 0 24 24"><path d="M5 6h14M8 6v12M16 6v12M5 18h14"/></svg></span>
+              <span class="starter-card-copy"><span class="starter-card-title">Compare sources</span><span class="starter-card-description">See agreements, conflicts, and evidence quality.</span></span>
+              <span class="starter-arrow" aria-hidden="true">↗</span>
+            </button>
+            <button type="button" class="starter-card" data-prompt="Find the exact facts, figures, dates, and assumptions related to my question. Clearly separate documented facts from inference.">
+              <span class="starter-icon" aria-hidden="true"><svg class="ui-icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4M11 8.5v5M8.5 11h5"/></svg></span>
+              <span class="starter-card-copy"><span class="starter-card-title">Find an exact fact</span><span class="starter-card-description">Locate figures, dates, and the assumptions behind them.</span></span>
+              <span class="starter-arrow" aria-hidden="true">↗</span>
+            </button>
+            <button type="button" class="starter-card" data-prompt="Find the original sources supporting this topic and cite the relevant pages.">
+              <span class="starter-icon" aria-hidden="true"><svg class="ui-icon" viewBox="0 0 24 24"><path d="M4 5h10M9 5c0 6-2.2 10-6 13M6 11c1.5 2.4 3.4 4.3 6 5.5M15 19l3-8 3 8M16 16h4"/></svg></span>
+              <span class="starter-card-copy"><span class="starter-card-title">Show the sources</span><span class="starter-card-description">Find the original pages behind an answer.</span></span>
+              <span class="starter-arrow" aria-hidden="true">↗</span>
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <div id="chat-history" role="log" aria-label="Conversation history" aria-live="off"></div>
+      <button type="button" id="scroll-to-latest-btn" class="hidden" aria-label="Scroll to the latest message">
+        <svg class="ui-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M12 4v14M6.5 12.5 12 18l5.5-5.5"/></svg>
+        <span>Latest</span>
+      </button>
+    </section>
+
+    <footer id="composer-dock">
+      <div class="composer-frame">
+        <div id="composer-shortcuts" aria-label="Research question shortcuts">
+          <button type="button" class="composer-shortcut" data-composer-prompt="Summarize the strongest evidence in the available documents and cite each key finding.">
+            <svg class="ui-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M7 5h10M7 10h10M7 15h6"/></svg><span>Summarize evidence</span>
+          </button>
+          <button type="button" class="composer-shortcut" data-composer-prompt="Compare the relevant sources, including where they agree, differ, and which evidence is strongest.">
+            <svg class="ui-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M7 4v16M17 4v16M4 8h6M14 16h6"/></svg><span>Compare sources</span>
+          </button>
+          <button type="button" class="composer-shortcut" data-composer-prompt="Find the exact figures, dates, and assumptions related to this topic. Separate documented facts from inference.">
+            <svg class="ui-icon" aria-hidden="true" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="5.5"/><path d="m15 15 5 5M10.5 8v5M8 10.5h5"/></svg><span>Find exact facts</span>
+          </button>
+          <button type="button" class="composer-shortcut" data-composer-prompt="In [file name], calculate the [count, distinct count, sum, average, minimum, maximum, or difference] for [column or records], filtered by [condition].">
+            <svg class="ui-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M6 4h12v16H6zM9 8h6M9 12h2M13 12h2M9 16h2M13 16h2"/></svg><span>Count &amp; calculate</span>
+          </button>
+          <button type="button" class="composer-shortcut" data-composer-prompt="סכם את הראיות החזקות ביותר במסמכים והוסף הפניה לכל ממצא מרכזי.">
+            <svg class="ui-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M4 6h12M4 11h9M4 16h7"/></svg><span>Hebrew summary</span>
+          </button>
+        </div>
+        <div id="composer">
+          <label class="sr-only" for="chat-input">Ask a question about your documents</label>
+          <div class="composer-input-wrap">
+            <textarea id="chat-input" rows="1" dir="auto" maxlength="4000" aria-describedby="composer-help"></textarea>
+          </div>
+          <button id="send-btn" type="button" aria-label="Send message" disabled>
+            <span id="send-btn-icon" class="send-glyph" aria-hidden="true"></span>
+          </button>
+        </div>
+        <div id="composer-help" class="composer-meta">
+          <span class="composer-meta-copy"><span id="composer-status-copy"></span></span>
+        </div>
+      </div>
+    </footer>
+  </main>
+
+  <button type="button" id="source-panel-backdrop" aria-label="Close conversation sources" tabindex="-1" hidden></button>
+  <aside id="source-panel" aria-labelledby="source-panel-title" aria-hidden="true" hidden>
+    <header class="source-panel-header">
+      <div>
+        <div class="source-panel-eyebrow">Evidence map</div>
+        <h2 id="source-panel-title">Conversation sources</h2>
+      </div>
+      <button type="button" id="source-panel-close" aria-label="Close conversation sources">
+        <svg class="ui-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="m7 7 10 10M17 7 7 17"/></svg>
+      </button>
+    </header>
+    <div class="source-overview" aria-label="Source summary">
+      <div class="source-stat"><strong id="source-unique-count" class="source-stat-value">0</strong><span class="source-stat-label">Unique sources</span></div>
+      <div class="source-stat"><strong id="source-reference-count" class="source-stat-value">0</strong><span class="source-stat-label">References</span></div>
+    </div>
+    <label class="source-search-shell" for="source-search">
+      <span class="sr-only">Filter conversation sources</span>
+      <svg class="ui-icon" aria-hidden="true" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg>
+      <input id="source-search" type="search" autocomplete="off" placeholder="Filter sources…"/>
+      <button type="button" id="source-search-clear" class="hidden" aria-label="Clear source filter">
+        <svg class="ui-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="m8 8 8 8M16 8l-8 8"/></svg>
+      </button>
+    </label>
+    <div id="source-panel-content"></div>
+  </aside>
+</div>
+
+<div id="settings-overlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="settings-title" aria-describedby="settings-description" aria-hidden="true">
+  <form id="settings-dialog" class="modal-card" novalidate>
+    <div class="modal-header">
+      <div>
+        <h2 id="settings-title" class="modal-title">Workspace settings</h2>
+        <p id="settings-description" class="modal-subtitle">Connect Hebrew-English RAG Application to your knowledge API.</p>
+      </div>
+      <button type="button" id="settings-close-btn" class="icon-button" aria-label="Close settings">
+        <svg class="ui-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="m7 7 10 10M17 7 7 17"/></svg>
+      </button>
+    </div>
+
+    <div class="modal-body">
+      <div class="settings-grid">
+        <div class="field-group">
+          <label class="field-label" for="api-base-url">API base URL</label>
+          <input id="api-base-url" class="field-input" type="url" inputmode="url" autocomplete="url" placeholder="http://localhost:8000" aria-describedby="api-url-help settings-error"/>
+          <p id="api-url-help" class="field-help">The address of the backend that answers questions.</p>
+        </div>
+
+        <div class="field-group">
+          <label class="field-label" for="tenant-id">Knowledge-base ID</label>
+          <select id="tenant-id" class="field-input" aria-describedby="tenant-help settings-error">
+            <option value="">Default workspace</option>
+          </select>
+          <p id="tenant-help" class="field-help">Select an authorized knowledge base. Each keeps its own documents and conversations.</p>
+        </div>
+
+        <div class="field-group">
+          <label class="field-label" for="request-timeout-seconds">Answer timeout</label>
+          <input id="request-timeout-seconds" class="field-input" type="number" min="1200" max="1200" step="1" inputmode="numeric" readonly aria-describedby="request-timeout-help settings-error"/>
+          <p id="request-timeout-help" class="field-help">Gemma requests allow up to 60 minutes for loading and generation. Stop ends the wait in this browser; the server may still finish processing. Retrying is explicit.</p>
+        </div>
+
+        <div class="theme-row">
+          <div>
+            <div class="field-label">Appearance</div>
+            <p class="field-help">Switch between light and dark themes.</p>
+          </div>
+          <button id="theme-toggle-btn" type="button" role="switch" aria-checked="false" aria-label="Use dark theme">
+            <span id="theme-toggle-knob" aria-hidden="true"></span>
+          </button>
+        </div>
+
+        <div class="field-group">
+          <label class="field-label" for="processing-motion">Processing indicator</label>
+          <select id="processing-motion" class="field-input" aria-describedby="processing-motion-help">
+            <option value="system">Follow system motion preference</option>
+            <option value="animated">Animate the indicator</option>
+            <option value="static">Keep the indicator static</option>
+          </select>
+          <p id="processing-motion-help" class="field-help">This affects only the dot shown while an answer is being prepared.</p>
+        </div>
+
+        <div class="connection-test-card">
+          <div id="settings-connection-status" data-status="idle" role="status" aria-live="polite">
+            <span class="settings-status-dot" aria-hidden="true"></span>
+            <div class="settings-status-copy">
+              <div id="settings-connection-label">Connection not tested</div>
+              <div id="settings-connection-detail">Test these details before saving.</div>
+            </div>
+          </div>
+          <button type="button" id="settings-test-connection-btn">Test connection</button>
+        </div>
+      </div>
+      <p id="settings-error" class="hidden" role="alert"></p>
+    </div>
+
+    <div class="modal-actions">
+      <button type="button" id="settings-cancel-btn" class="secondary-button">Cancel</button>
+      <button type="submit" id="settings-save-btn" class="primary-button">Save settings</button>
+    </div>
+  </form>
+</div>
+
+<div id="thread-action-overlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="thread-action-title" aria-describedby="thread-action-description" aria-hidden="true">
+  <form id="thread-action-dialog" class="modal-card compact-modal" novalidate>
+    <div class="modal-header">
+      <div>
+        <h2 id="thread-action-title" class="modal-title">Update conversation</h2>
+        <p id="thread-action-description" class="modal-subtitle"></p>
+      </div>
+      <button type="button" id="thread-action-close-btn" class="icon-button" aria-label="Close dialog">
+        <svg class="ui-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="m7 7 10 10M17 7 7 17"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div id="thread-action-visual" class="action-dialog-visual" aria-hidden="true">
+        <svg class="ui-icon" viewBox="0 0 24 24"><path d="M5 19h3.2L18.7 8.5l-3.2-3.2L5 15.8V19Zm8.9-12.1 3.2 3.2"/></svg>
+      </div>
+      <div id="thread-action-field" class="field-group">
+        <label id="thread-action-label" class="field-label" for="thread-action-input">Conversation name</label>
+        <input id="thread-action-input" class="field-input" type="text" maxlength="80" autocomplete="off" aria-describedby="thread-action-error"/>
+      </div>
+      <p id="thread-action-error" class="hidden" role="alert"></p>
+    </div>
+    <div class="modal-actions">
+      <button type="button" id="thread-action-cancel-btn" class="secondary-button">Cancel</button>
+      <button type="submit" id="thread-action-confirm-btn" class="primary-button">Save</button>
+    </div>
+  </form>
+</div>
+
+<div id="help-overlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="help-title" aria-hidden="true">
+  <div id="help-dialog" class="modal-card">
+    <div class="modal-header">
+      <div>
+        <h2 id="help-title" class="modal-title">How to get a strong answer</h2>
+        <p class="modal-subtitle">A few small details make retrieval much more precise.</p>
+      </div>
+      <button type="button" id="help-close-btn" class="icon-button" aria-label="Close help">
+        <svg class="ui-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="m7 7 10 10M17 7 7 17"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <section class="about-note" aria-labelledby="about-heading">
+        <h3 id="about-heading">About Hebrew-English RAG Application</h3>
+        <p id="answer-verification-note">Answers are generated by AI and may contain mistakes. Use the original document pages to review the supporting context. Answers are not independently verified.</p>
+      </section>
+      <ol class="help-list">
+        <li><span class="help-step">1</span><div><strong>Be specific</strong><p>Include the topic, time period, organization, or document you care about.</p></div></li>
+        <li><span class="help-step">2</span><div><strong>Ask for evidence</strong><p>Request exact figures, source comparisons, or a separation between facts and inference.</p></div></li>
+        <li><span class="help-step">3</span><div><strong>Use follow-up questions</strong><p>Continue in the same conversation so Hebrew-English RAG Application can use the recent context.</p></div></li>
+        <li><span class="help-step">⌨</span><div><strong>Move faster</strong><p>Press <kbd>Ctrl/⌘ K</kbd> to search conversations or <kbd>/</kbd> to jump to the question box. You can draft the next question while an answer is running.</p></div></li>
+        <li><span class="help-step">↺</span><div><strong>Refine without starting over</strong><p>Edit the latest question to replace its answer, or copy an answer together with its source details.</p></div></li>
+        <li><span class="help-step">HE</span><div><strong>Ask in Hebrew</strong><p>Hebrew questions retain correct text direction and receive Hebrew answers.</p></div></li>
+      </ol>
+    </div>
+    <div class="modal-actions">
+      <button type="button" id="help-done-btn" class="primary-button">Got it</button>
+    </div>
+  </div>
+</div>
+
+<div id="app-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
+<div id="toast-region" aria-live="polite" aria-atomic="true"></div>
+<script src="./frontend_policy.js" defer></script>
+<script src="./ui-language.js?v=201429f724f3" defer></script>
+<script src="./app.js?v=processing-motion-2" defer></script>
+</body></html>

@@ -1,0 +1,21 @@
+# Resolve and lock these direct requirements on Ubuntu 26.04 / Python 3.14.
+# The GGUF language model is served by the separately pinned llama.cpp binary;
+# no llama-cpp-python, bitsandbytes, PEFT, or OpenAI SDK is required.
+fastapi
+uvicorn[standard]
+pydantic
+chromadb
+sentence-transformers
+numpy
+torch
+transformers
+pypdf
+PyMuPDF
+Pillow
+pytesseract
+# Runtime schema validation, HTTP requests and tabular/text processing.
+jsonschema
+requests
+pandas
+sacrebleu
+rouge-score
