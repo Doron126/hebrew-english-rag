@@ -74,8 +74,8 @@
       <div class="topbar-actions">
         <div class="backend-control">
           <label class="backend-label" for="chat-backend">Answer model</label>
-          <span id="answer-model-name">Gemma 4 31B</span>
-          <input id="chat-backend" type="hidden" value="gemma">
+          <span id="answer-model-name">Local model</span>
+          <input id="chat-backend" type="hidden" value="">
           <span id="model-state" role="status" aria-live="polite">Checking selected model…</span>
           <button type="button" id="model-retry" hidden>Retry selected model</button>
           <details id="model-diagnostic-details" hidden><summary>Technical details</summary><pre id="model-diagnostics"></pre></details>
@@ -233,7 +233,7 @@
         <div class="field-group">
           <label class="field-label" for="request-timeout-seconds">Answer timeout</label>
           <input id="request-timeout-seconds" class="field-input" type="number" min="1200" max="1200" step="1" inputmode="numeric" readonly aria-describedby="request-timeout-help settings-error"/>
-          <p id="request-timeout-help" class="field-help">Gemma requests allow up to 60 minutes for loading and generation. Stop ends the wait in this browser; the server may still finish processing. Retrying is explicit.</p>
+          <p id="request-timeout-help" class="field-help">Model requests allow up to 60 minutes for loading and generation. Stop ends the wait in this browser; the server may still finish processing. Retrying is explicit.</p>
         </div>
 
         <div class="theme-row">
@@ -339,6 +339,6 @@
 <div id="app-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
 <div id="toast-region" aria-live="polite" aria-atomic="true"></div>
 <script src="./frontend_policy.js" defer></script>
-<script src="./ui-language.js?v=201429f724f3" defer></script>
-<script src="./app.js?v=processing-motion-2" defer></script>
+<script src="./ui-language.js?v=31c7c1ca15ab" defer></script>
+<script src="./app.js?v=cece842b1b4d" defer></script>
 </body></html>

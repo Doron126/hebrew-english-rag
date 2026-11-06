@@ -144,6 +144,12 @@ def unqualified_whole_summary(reference, body):
     if getattr(reference, 'kind', '') == 'presentation_topic':
         return True
     value = str(body or '').strip(' \t\r\n.,;:?!')
+    # Removing an explicitly named source can leave only its grammatical
+    # particle/article ("סכם את guide.md" / "summarize the guide.md"). That
+    # exact remainder adds no topic; qualified requests still use the full
+    # existing grammar below.
+    if value.casefold() in {'את', 'the'}:
+        return True
     return bool(re.fullmatch(r'(?:(?:את|the)\s+)?(?:ה?מסמך|ה?קובץ|document|file)?', value, re.I))
 
 

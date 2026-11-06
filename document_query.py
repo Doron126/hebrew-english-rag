@@ -198,7 +198,9 @@ def named_document_reference(query):
    # request, so punctuation inside a filename cannot end it prematurely.
    quoted=re.match(r'(?P<quote>[\"\'״])(?P<title>.+?)(?P=quote)(?=\s|[.,;:?!]|$)',
        query[match.start('title'):])
-   filename=re.match(r'^(.+\.(?:pdf|docx?|pptx?|xlsx?|csv|tsv|txt|md|odt|ods|odp))(?=\s+(?:say|says|contain|contains|about|לגבי|אודות|על)\b|$)',title,re.I)
+   # Sentence punctuation after an unquoted, recognized filename is not part
+   # of its identity. Quoted filenames retain every literal character below.
+   filename=re.match(r'^(.+\.(?:pdf|docx?|pptx?|xlsx?|csv|tsv|txt|md|odt|ods|odp))(?=[.!]+\s*$|\s+(?:say|says|contain|contains|about|לגבי|אודות|על)\b|$)',title,re.I)
    if quoted:title=quoted.group('title')
    elif filename:title=filename.group(1)
    else:title=re.split(r'\s+(?:say|says|contain|contains)\s+about\s+|\s+(?:about|לגבי|אודות|על)\s+',title,maxsplit=1,flags=re.I)[0].strip()

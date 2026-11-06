@@ -1,144 +1,251 @@
 # Installation and first use
 
-This guide describes the available local setup on **Ubuntu 26.04 x86-64 in WSL**, using the Linux shell. The dependency lock targets CPython 3.14.4. It does not establish support for native Windows, other Linux releases, or macOS. The commands below are source-checked. A publication walkthrough indexed one synthetic text file (one chunk, no failures or skips) in isolated storage using an existing Python environment and a locally cached embedding model. An in-process API test returned 200 for liveness, the manually configured synthetic tenant catalog and its indexed document list; its source endpoint returned the exact synthetic original. This was a direct source-opening check, not a citation returned by a query. A separate isolated Uvicorn startup on an ephemeral loopback port returned 200 for `/livez` and `/api/tenants`; `/readyz` returned 503 with `model_unavailable` for the synthetic indexed tenant and absent isolated model socket. The process was then stopped. These checks reused an existing Python environment and cached embedding model; they did not verify a fresh dependency installation, successful model readiness, or an end-to-end model answer.
-
-**Important limitation:** a fresh installation cannot currently start its generation model using a portable configuration. The included supervisor requires a specifically validated WSL/systemd, llama.cpp and Gemma profile, and its machine-specific paths have been replaced with invalid placeholders in this publication. Setting a URL or placing a model in a directory does not make the supervisor accept it. Operating it on a new machine requires substantial adaptation of the supervisor and its deployment, outside this reference publication. Do not disable its admission or authentication checks. Indexing and API liveness can be attempted independently; a first model-backed answer and full readiness are not established.
-
-No original tenants, customer documents, or prebuilt indexes are included. Create your own tenants and ingest your own documents. The local interface does not create users, tenants, or uploads. Tenant creation for this local mode is an operator configuring a tenant ID and creating its own document directory; no account bootstrap is implemented in this mode.
+This guide sets up the application on Linux x86-64, including Ubuntu under WSL2. You will install the Python application and a local model server, create your own knowledge base, and index your own documents. The repository starts empty; the setup commands create the configuration and data for your installation.
 
 ## Requirements
 
-- Ubuntu 26.04 x86-64 under WSL, Python 3.14.4, `python3.14-venv`, `pip`, Git, curl, enough disk space for the dependencies, downloaded models and your documents, and loopback networking. The locked Python dependencies include CPU PyTorch, FastAPI, Chroma, and sentence-transformers.
-- Indexing and retrieval use the separately downloaded `intfloat/multilingual-e5-large-instruct` embedding model. An optional reranker is controlled by `USE_RERANKER`; this guide disables it. These models use system memory even if generation uses a GPU.
-- Generation requires a compatible llama.cpp `llama-server` and Gemma 4 31B Q4_0 GGUF, separately obtained and installed. They are not included. The code selects the fixed model identifier `gemma-4-31b`; it does not connect directly to a user-supplied HTTP model server.
-- PDF and image OCR optionally require Tesseract and the Hebrew and English language data. OCR and table extraction can fail or produce imperfect text. Install `tesseract-ocr`, `tesseract-ocr-heb`, and `tesseract-ocr-eng` if needed. Searchable PDFs do not necessarily need OCR.
-- The historical WSL supervisor profile required 12 GiB of Windows physical memory available, 12 GiB of Windows commit headroom, 19 GiB of guest available memory, and 8 GiB of free GPU memory at admission. These are configurable profile checks, not universal hardware minimums; GPU memory and system RAM are different resources. The publication does not establish a new hardware recommendation.
+| Component | What to prepare |
+|---|---|
+| Python | Python 3.12 with a virtual environment. The dependency profile uses CPU PyTorch. |
+| Local model server | A `llama-server` executable from [llama.cpp b12110](https://github.com/ggml-org/llama.cpp/releases/tag/b12110). Build instructions are below. |
+| Generation model | An instruction-tuned GGUF model with a chat template. The walkthrough uses Qwen3-4B-Instruct-2507 in the Q4_K_M GGUF published by Unsloth. |
+| Embedding model | Downloaded on first ingestion. The walkthrough selects `intfloat/multilingual-e5-small`; initialization otherwise defaults to `intfloat/multilingual-e5-large-instruct`. |
+| Hardware | Enough system RAM for the generation model, embeddings, application, and context buffers. GPU acceleration is optional and uses a compatible llama.cpp build. |
+| Storage and network | Space for Python dependencies, model files, indexes, and your documents. Installation and the first model downloads need internet access. |
+| Optional OCR | Tesseract with Hebrew and English language data for scanned PDFs and images. |
 
-For context, the developer's observed WSL guest exposed 12 logical CPUs on an Intel Core i5-11600, approximately 25.8 GiB of guest RAM, and an NVIDIA GeForce RTX 3060 with 12 GiB of GPU memory. This describes the observed machine, not a tested minimum or a recommendation.
+Model file size is only part of the memory requirement. Embeddings and retrieval use system RAM even when generation is offloaded to a GPU. Choose model size and GPU layer settings for the memory available on your machine.
 
-The private GitHub repository requires an account with authorized access. Package installation, cloning, and the first model download need network access and may require upstream access or license acceptance. No credentials belong in this repository or these commands.
+The examples below use Ubuntu package commands. Run them in the Linux shell. Access to the private GitHub repository is required while its visibility remains private.
 
-## Obtain code and Python dependencies
+## 1. Install the application
 
-Run in the WSL Ubuntu shell, from a directory where you keep source checkouts:
+Install Git and curl if needed:
+
+```bash
+sudo apt update
+sudo apt install git curl
+```
+
+Clone the repository and create a Python 3.12 environment:
 
 ```bash
 git clone https://github.com/Doron126/hebrew-english-rag.git
 cd hebrew-english-rag
-sudo apt update
-sudo apt install python3.14 python3.14-venv git curl
-python3.14 -m venv .venv
+python3.12 -m venv .venv
 . .venv/bin/activate
-python -m pip install --upgrade pip
+```
+
+<details>
+<summary>If Python 3.12 or venv support is missing</summary>
+
+[uv](https://docs.astral.sh/uv/getting-started/installation/) can download Python and create the environment. Using the official installer and its default location, run this from the checkout in place of the virtual-environment command above:
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+"$HOME/.local/bin/uv" venv --python 3.12 --seed .venv
+. .venv/bin/activate
+```
+
+</details>
+
+Install CPU PyTorch first, followed by the application dependencies:
+
+```bash
+python -m pip install --no-deps -r requirements-cpu.txt
 python -m pip install -r requirements.lock.txt
+python -m pip check
 ```
 
-For OCR, additionally run `sudo apt install tesseract-ocr tesseract-ocr-heb tesseract-ocr-eng`. The repository lock has an extra index for the CPU PyTorch wheel. It does not install the separate native llama.cpp server. Installation from the lock requires access to package indexes. The commands are intended for this target, not a general cross-platform guarantee.
+`requirements-cpu.txt` installs the CPU PyTorch wheel from its official package index. The next command installs all remaining dependencies together using the pinned versions in `requirements.lock.txt` from PyPI. Keep this order. These packages provide the FastAPI browser application, ingestion, embeddings, and retrieval; the native model server is installed separately in the next step.
 
-## Configure an isolated installation
+## 2. Obtain llama-server
 
-Run from the checkout in the same WSL shell. Pick a data directory that belongs to you, and use it consistently for indexing and serving. The example tenant ID is an illustration; replace `my-tenant` with your own 1–64 ASCII letters, digits, hyphens or underscores, starting and ending with a letter or digit. This creates no tenant automatically on checkout.
+You can use the Ubuntu x64 CPU archive from the [official b12110 release](https://github.com/ggml-org/llama.cpp/releases/tag/b12110), keeping its executable and accompanying libraries together. Alternatively, build the pinned version below. These commands keep the model runtime outside the application checkout and leave your current directory unchanged.
 
 ```bash
-export RAG_DATA="$HOME/hebrew-english-rag-data"
-export TENANT_ID="my-tenant"
-mkdir -p "$RAG_DATA/documents/$TENANT_ID" "$RAG_DATA/config/tenants" "$RAG_DATA/cache"
-export APP_ENV=wsl
-export APP_BIND_HOST=127.0.0.1
-export TENANT_AUTH_MODE=client
-export LOCAL_ALLOWED_TENANTS="$TENANT_ID"
-export WARMUP_TENANTS=""
-export PROJECTX_GEMMA_TENANTS="$TENANT_ID"
-export DOCS_BASE_DIR="$RAG_DATA/documents"
-export TENANT_CONFIG_DIR="$RAG_DATA/config/tenants"
-export CHROMA_PATH="$RAG_DATA/chroma"
-export INGEST_EXTRACTION_AUDIT_DIR="$RAG_DATA/extraction-audit"
-export HF_HOME="$RAG_DATA/cache/huggingface"
-export GEMMA_SUPERVISOR_SOCKET="$RAG_DATA/supervisor.sock"
-export USE_RERANKER=0
-export CHAT_USE_RERANKER=0
+sudo apt install build-essential cmake libssl-dev
+
+RAG_LLAMA_DIR="$HOME/.local/share/hebrew-english-rag-tools/llama.cpp-b12110"
+mkdir -p "$HOME/.local/share/hebrew-english-rag-tools"
+git clone --depth 1 --branch b12110 \
+  https://github.com/ggml-org/llama.cpp.git "$RAG_LLAMA_DIR"
+cmake -S "$RAG_LLAMA_DIR" -B "$RAG_LLAMA_DIR/build" \
+  -DCMAKE_BUILD_TYPE=Release
+cmake --build "$RAG_LLAMA_DIR/build" --config Release \
+  --target llama-server -j 2
+"$RAG_LLAMA_DIR/build/bin/llama-server" --version
 ```
 
-These process environment variables override the repository's optional `.env` and legacy `env` files (`config_env.py`). Repeat them in each shell used for the API or ingestion. `PROJECTX_GEMMA_TENANTS` is read by the separate supervisor process, so changing it in the API shell does not configure a different running supervisor. Do not point this example at another installation's storage or model socket.
+The resulting executable is `$HOME/.local/share/hebrew-english-rag-tools/llama.cpp-b12110/build/bin/llama-server`. The commands follow the [upstream CMake build instructions](https://github.com/ggml-org/llama.cpp/blob/b12110/docs/build.md).
 
-| Setting | Purpose | Status and code default | Example / where set |
-|---|---|---|---|
-| `APP_ENV` | Select local or other authorization behavior | Optional; `dev` | `wsl`, shell |
-| `APP_BIND_HOST` | Local-mode binding check | Optional; `127.0.0.1` | `127.0.0.1`, shell and matching Uvicorn argument |
-| `TENANT_AUTH_MODE` | Tenant selection mode | Optional; `client` locally, `trusted_header` otherwise | `client`, shell |
-| `LOCAL_ALLOWED_TENANTS` | Operator's local WSL tenant allow-list | Required for WSL local tenant selection; empty | `my-tenant`, shell |
-| `WARMUP_TENANTS` | Tenants warmed at application startup | Optional; empty | Empty initially; shell |
-| `PROJECTX_GEMMA_TENANTS` | Supervisor's generation tenant allow-list | Required by supervisor; empty fails authorization | `my-tenant`, supervisor environment |
-| `TENANT_CONFIG_DIR` | Optional tenant profile directory | Optional; `config/tenants` | `$RAG_DATA/config/tenants`, shell |
-| `DOCS_BASE_DIR` | Root of original documents, with one directory per tenant | Optional; `data` | `$RAG_DATA/documents`, shell |
-| `CHROMA_PATH` | Persistent Chroma index | Optional; `storage/chroma` | `$RAG_DATA/chroma`, shell |
-| `RAG_COLLECTION` | Base collection name | Optional; `company-knowledge` | `my-knowledge`, shell |
-| `TENANT_STRATEGY` | Per-tenant collections or shared metadata | Optional; `collection` | `collection`, shell |
-| `EMBED_MODEL` | Sentence-transformers embedding model | Optional; `intfloat/multilingual-e5-large-instruct` | Same name, shell |
-| `USE_RERANKER` | Enable retrieval reranker | Optional; `1` in code | `0`, shell |
-| `CHAT_USE_RERANKER` | Enable answer-stage reranking | Optional; `1` | `0`, shell |
-| `INGEST_EXTRACTION_AUDIT_DIR` | Extraction audit output | Optional; `extraction-audit` beside the Chroma directory | `$RAG_DATA/extraction-audit`, shell |
-| `PROJECT_X_CONVERSATION_STATE_PATH` | Persist backend conversation state as SQLite | Optional; unset means in-memory | `$RAG_DATA/conversations.sqlite3`, shell |
-| `LLM_BACKEND` | Supported generation backend | Optional; `llama_cpp` | `llama_cpp`, shell |
-| `LLAMA_MODEL_ID` | Expected generation model identifier | Optional; `gemma-4-31b` | `gemma-4-31b`, shell |
-| `GEMMA_SUPERVISOR_SOCKET` | API client Unix socket for the supervisor | Optional; `run/hebrew-english-rag/supervisor.sock` relative to the process working directory | `$RAG_DATA/supervisor.sock`, shell |
-| `HF_HOME` | Hugging Face downloaded-model cache | Optional; Hugging Face default | `$RAG_DATA/cache/huggingface`, shell |
+For NVIDIA GPU generation, follow the upstream CUDA prerequisites and configure the build with `-DGGML_CUDA=ON`. Select the number of layers to offload with `--gpu-layers` during application initialization. The walkthrough below uses CPU generation.
 
-The API listens on the host and port passed to Uvicorn below, not through an undocumented port variable. Its client uses `GEMMA_SUPERVISOR_SOCKET` to locate the supervisor Unix socket; the isolated path above prevents it from contacting another installation. The supervisor receives its listening socket from systemd through file descriptor 3. A matching systemd `.socket` unit must create that socket, but this publication does not include the required unit or deployment. Choosing the client socket therefore does not configure or start a listening supervisor. `LLAMA_BASE_URL` does not override the client socket. Client-selected local tenancy is restricted to loopback and does not provide account authentication. Trusted-header mode requires a separately configured trusted identity proxy; this guide does not supply one.
+## 3. Download a generation model
 
-## Prepare models
-
-The first real ingest downloads the [multilingual E5 embedding model](https://huggingface.co/intfloat/multilingual-e5-large-instruct) through sentence-transformers into the configured Hugging Face cache. Review its model card and license, and ensure network and any required access are available. The same model must be selected for ingestion and querying. Optional reranking may require its own model download.
-
-The embedding download is selected by model name, without an immutable upstream revision in this publication. The Python dependency lock therefore does not establish exact model-weight reproducibility. The documented browser interface does not require Streamlit; the separately retained `webui_streamlit.py` is a legacy reference and its dependencies and operation are outside this installation path.
-
-The generation implementation expects a separately run llama.cpp server owned by its supervisor and a Gemma 4 31B Q4_0 GGUF file. Consult [llama.cpp](https://github.com/ggml-org/llama.cpp) and the [Gemma model information](https://huggingface.co/google/gemma-4-31B-it-qat-q4_0-gguf), including upstream access and license terms. The application does not distribute these assets. The model page does not establish that any given download matches the supervisor's exact expected bytes. The supervisor cannot accept a new model location or an already-running server through the configuration above; this is an unresolved setup limitation, not a complete model-start command.
-
-## Create a tenant and index your documents
-
-The directory and allow-list configured above define a user-chosen local tenant namespace. A profile file is optional; absent a display name the API displays the ID. There is no built-in account creation or UI file-upload flow. Copy your own small supported files to `"$RAG_DATA/documents/$TENANT_ID"` using your preferred file manager or shell, then run, from the checkout and activated virtual environment:
+Download a GGUF file from its publisher and review the model card and license. This example uses **Qwen3-4B-Instruct-2507**, with the Q4_K_M quantization from [Unsloth's GGUF publication](https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF). The file is approximately 2.50 GB. The download below pins the publisher revision and checks the file's SHA-256.
 
 ```bash
-python ingest.py --tenant "$TENANT_ID" \
-  --docs-dir "$RAG_DATA/documents/$TENANT_ID" \
-  --continue-on-error --report-json "$RAG_DATA/ingest-report.json"
+RAG_MODEL_DIR="$HOME/models/Qwen3-4B-Instruct-2507"
+mkdir -p "$RAG_MODEL_DIR"
+curl --fail --location \
+  --output "$RAG_MODEL_DIR/Qwen3-4B-Instruct-2507-Q4_K_M.gguf" \
+  "https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/18727206c51467496bfba014368bd0a30e97f411/Qwen3-4B-Instruct-2507-Q4_K_M.gguf"
+printf '%s  %s\n' \
+  "3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597" \
+  "$RAG_MODEL_DIR/Qwen3-4B-Instruct-2507-Q4_K_M.gguf" | sha256sum --check
 ```
 
-The ingestion command creates its Chroma collection on first use; no separate database migration command is required. It prints per-file processing and a final summary. Inspect the report for each document's `status`, errors, unchanged files and totals:
+The checksum should report `OK` before you continue. You can choose another instruction-tuned GGUF supported by the pinned llama.cpp build. Answer quality depends on the model, extraction results, and available evidence; choose a model suited to the languages and documents you intend to query. Larger models also require more memory.
+
+## 4. Initialize your installation
+
+From the application checkout, with `.venv` active:
 
 ```bash
-python -m json.tool "$RAG_DATA/ingest-report.json"
+python manage.py init \
+  --llama-server "$HOME/.local/share/hebrew-english-rag-tools/llama.cpp-b12110/build/bin/llama-server" \
+  --model "$HOME/models/Qwen3-4B-Instruct-2507/Qwen3-4B-Instruct-2507-Q4_K_M.gguf" \
+  --model-id "Qwen3-4B-Instruct-2507" \
+  --data-dir "$HOME/hebrew-english-rag-data" \
+  --embedding-model intfloat/multilingual-e5-small
 ```
 
-A partial import exits with code 2 when `--continue-on-error` encounters failures. Correct the reported file or dependency issue and rerun ingestion. By default unchanged indexed files can be skipped. `--sync` and `--clear` can remove obsolete index records after a successful scan and are not needed for the first import. Keep the originals in the tenant directory: source links validate and open those originals.
+If you downloaded a prebuilt llama.cpp archive, replace `--llama-server` with the absolute path to its executable.
 
-The default include list covers text and Markdown, PDF, DOCX, XLSX, PPTX, HTML, CSV/TSV, JSON and several source/log formats, plus PNG/JPEG/WebP/SVG and PostScript. Extraction and OCR are best-effort and bounded; scans, images, complex tables and formatting are not guaranteed to be understood. An unextractable file is reported rather than assumed to be indexed.
+Initialization writes the checkout's `.env` and creates the external data directories and a private local model API key. **It creates no tenants and indexes no documents.** The generated configuration is read automatically by `manage.py`; no repeated environment exports are needed.
 
-## Start and inspect the API
+The default application port is `18080`, and the model server uses `18081`. To choose other ports at initialization, add `--port 18080 --model-port 18081` with your preferred values. Both services bind to `127.0.0.1`. A GPU-enabled installation can add a positive `--gpu-layers` value; the default is `0`.
 
-With the same environment exports and activated virtual environment, from the checkout:
+If a configuration already exists, initialization leaves it in place. Edit that `.env` to change settings, then restart the application. Use absolute paths in it; values are read as configuration, not as shell expressions.
+
+## 5. Create a knowledge base and ingest your files
+
+Choose a tenant ID for your documents. The example uses `my-documents`; replace it consistently if you prefer another ID. IDs contain 1–64 ASCII letters, digits, hyphens, or underscores, starting and ending with a letter or digit. The display name can be Hebrew or English.
 
 ```bash
-python -m uvicorn chat_api:app --host 127.0.0.1 --port 18080
+python manage.py tenant add my-documents --name "My documents"
+python manage.py tenant list
 ```
 
-In another WSL shell, check liveness and visit the interface:
+The command prints the new document directory. With the paths used above, it is:
+
+```text
+~/hebrew-english-rag-data/documents/my-documents/
+```
+
+Copy your own files into that directory using a file manager or shell. Start with a few readable documents, then index them:
+
+```bash
+python manage.py ingest --tenant my-documents
+```
+
+The first ingestion downloads the selected embedding model. Subsequent runs reuse the model cache and can skip unchanged documents. Keep the same embedding model for ingestion and querying.
+
+The command prints a summary and the report path. For this example:
+
+```bash
+python -m json.tool "$HOME/hebrew-english-rag-data/reports/my-documents-ingest.json"
+```
+
+Review failed or empty files before moving on. A partial import exits with code `2` while retaining successful work. Correct the reported file or dependency issue and rerun ingestion.
+
+Keep the originals in the tenant's document directory: citations open those files. Document updates should be followed by another ingestion run to refresh the index and source metadata.
+
+### File formats and OCR
+
+| Files | Processing |
+|---|---|
+| Text, Markdown, HTML, CSV/TSV, JSON | Text and structure extraction |
+| PDF | Native text extraction, with optional OCR for scanned content |
+| DOCX, XLSX, PPTX | Extraction from Office document structures |
+| PNG, JPEG, WebP | OCR through Tesseract when available |
+
+For Hebrew and English OCR on Ubuntu:
+
+```bash
+sudo apt install tesseract-ocr tesseract-ocr-heb tesseract-ocr-eng
+tesseract --list-langs
+```
+
+Confirm that `heb` and `eng` are listed. OCR results depend on scan quality and layout. Complex tables and images may need review; the ingestion report helps identify files that did not produce usable text. The UI reads the knowledge bases you configure; files are added through their directories and the ingestion command.
+
+## 6. Start the application
+
+Check the dependencies and configuration, then launch:
+
+```bash
+python manage.py doctor
+python manage.py serve
+```
+
+The launcher starts `llama-server`, waits for it to load the model, and then starts the API. When the API reports that startup is complete, open **[http://127.0.0.1:18080](http://127.0.0.1:18080)** in your browser.
+
+In **Settings**, choose **My documents**. Use the language button in the top bar to switch between Hebrew and English. For your first question, request a summary using the **exact filename you indexed, including its extension**. If your file is named `report.pdf`, enter `Summarize report.pdf.` or `סכם את report.pdf.`. Replace `report.pdf` with your own filename. Then open a returned source citation to review the original context.
+
+In a second terminal, you can check the running application:
 
 ```bash
 curl --fail http://127.0.0.1:18080/livez
+curl --fail -H "X-Tenant-ID: my-documents" \
+  http://127.0.0.1:18080/readyz
 ```
 
-Open `http://127.0.0.1:18080/` in a browser. In Settings, select the configured knowledge base; the local tenant catalog reads `LOCAL_ALLOWED_TENANTS`. `/livez` confirms only API liveness. `/readyz` also checks tenant index, source metadata, startup state and model readiness, so it should not be expected to pass without the separate working supervisor. A stopped or unavailable model is not repaired by restarting the API.
+`/livez` checks the API process. `/readyz` additionally checks the selected tenant's index, source metadata, and model runtime. `doctor` checks local setup before launch; it does not load the model or answer a question.
 
-When a compatible supervisor is available, a user can enter an English question such as “What does the document say about the project schedule?” or a Hebrew question such as “מה כתוב במסמך על לוח הזמנים?” and use a returned source link to open the original. These are illustrative questions, not measured results. Model-backed querying and opening a citation returned by a query have not been established for a fresh install of this publication.
+## 7. Stop, restart, and update documents
 
-## Stop, restart and troubleshoot
+Press **Ctrl+C** in the terminal running `manage.py serve`. It stops both processes it launched. Your documents, index, model cache, and conversation database remain in the data directory.
 
-Press Ctrl+C in the terminal running Uvicorn. Stop a separately managed supervisor through its own service manager; the API does not own it. Repeat the environment exports and command to restart the API. Chroma, originals, the model cache and any configured conversation SQLite file persist in the selected data directory; browser conversation history is kept in the browser's local storage. The backend conversation store is otherwise in memory. Extraction audit files and the report may contain document-derived information; protect them like your documents. Terminal output and service-manager logs are also local and may contain operational details.
+To start again, open a terminal in the checkout:
 
-- **Missing dependency:** confirm `.venv` is active and `python -m pip check` succeeds; reinstall from the lock if installation failed.
-- **Tenant catalog or index unavailable:** check `APP_ENV`, `LOCAL_ALLOWED_TENANTS`, matching tenant ID, `CHROMA_PATH` and ingestion report. A document directory alone is not an index.
-- **Model unavailable:** `/api/model` and `/readyz` report model state for a selected tenant. Confirm the separate supervisor is configured and running; the portable startup limitation above remains. An HTTP endpoint alone is not supported by the generation client.
-- **Missing model or resources:** check the upstream model/cache and the supervisor's service logs and admission state. Do not weaken checks or equate available RAM with GPU VRAM.
-- **Permission or port errors:** verify ownership and parent-directory traversal for your data directory; use another unused loopback port if `18080` is occupied. Check listeners with `ss -ltnp`.
-- **Ingestion failure:** inspect the per-document report and terminal error, check file readability, supported type, OCR dependencies and available disk. Do not delete user data as a generic repair step.
+```bash
+. .venv/bin/activate
+python manage.py serve
+```
+
+To update a knowledge base, stop the application, add or edit its files, and rerun `python manage.py ingest --tenant my-documents`. Start the application again when ingestion finishes. Use `--force` with the ingestion command when you explicitly want to re-extract and re-embed unchanged files.
+
+For another knowledge base, run `python manage.py tenant add` with a new ID, copy files into its printed directory, and ingest that tenant. Restart the application to load the updated tenant list.
+
+## Configuration and data locations
+
+The generated `.env` is local to this checkout. `manage.py` passes its values to the processes it starts. To use another configuration file, place the global option before the command, for example `python manage.py --config /absolute/path/workspace.env doctor`.
+
+| Setting | Purpose |
+|---|---|
+| `RAG_MODEL_RUNTIME=llama_cpp` | Select the portable local model connection |
+| `LLAMA_SERVER_BIN`, `LLAMA_MODEL_PATH` | Absolute paths to the server executable and GGUF model |
+| `LLAMA_MODEL_ID`, `BASE_MODEL` | Model alias; keep these two values in agreement |
+| `LLAMA_BASE_URL` | Model origin, such as `http://127.0.0.1:18081` |
+| `LLAMA_API_KEY_FILE` | Private key generated for the local model connection |
+| `APP_PORT` | Browser/API port; default `18080` |
+| `LLAMA_N_GPU_LAYERS` | Generation layers to offload; default `0` |
+| `LLAMA_CONTEXT_SIZE_TOKENS` | Model context; initialized to `4096` |
+| `LLAMA_THREADS` | CPU threads used by the model server |
+| `LOCAL_ALLOWED_TENANTS` | Tenant IDs created by the setup commands |
+| `DOCS_BASE_DIR`, `TENANT_CONFIG_DIR`, `CHROMA_PATH` | Original documents, tenant profiles, and persistent index |
+| `EMBED_MODEL`, `EMBED_DEVICE` | Embedding model and device; the local setup uses CPU |
+| `USE_RERANKER`, `CHAT_USE_RERANKER` | Optional rerankers; both disabled in the initial setup |
+| `HF_HOME` | Download cache for embedding and reranking models |
+| `PROJECT_X_CONVERSATION_STATE_PATH` | SQLite conversation database enabled by local initialization |
+| `INGEST_EXTRACTION_AUDIT_DIR` | Document extraction audit output |
+
+With the example data directory, originals live in `documents/<tenant-id>`, indexes in `chroma`, tenant profiles in `config/tenants`, and embedding-model downloads in `cache/huggingface`. The GGUF file remains at the model path you supplied during initialization. Ingestion reports are written to `reports`, extraction audits to `extraction-audit`, and model output to `logs/model.log`. Backend conversation state is stored in `conversations.sqlite3`; browser history and preferences also use browser local storage.
+
+The index, reports, audits, and conversations contain user data. Keep the data directory and local configuration private. Model downloads have their own upstream licenses. To retain an exact setup, record the model revision and file checksum alongside the pinned Python packages and llama.cpp version.
+
+## Troubleshooting
+
+| Symptom | What to check |
+|---|---|
+| A Python module is missing or incompatible | Activate `.venv`, install the CPU manifest and main lock in that order, then run `python -m pip check` and `python manage.py doctor`. |
+| The model does not load | Read the printed model log path. Check the GGUF download, server executable, available memory, and GPU build/settings. |
+| A port is already in use | Choose unused application and model ports in `.env`. The launcher leaves existing listeners alone. |
+| The knowledge base is absent from Settings | Check `python manage.py tenant list` and restart the application after adding a tenant. |
+| Readiness reports an empty or missing index | Run ingestion for the selected tenant and inspect its report. A document directory becomes searchable after ingestion. |
+| A source link is unavailable | Check that the original still exists in its tenant directory. Rerun ingestion after changing the file. |
+| A scan produces little or no text | Confirm Tesseract and the required language data are installed, inspect the scan, and rerun ingestion with `--force`. |
+| Model requests are slow | Check whether generation uses CPU or GPU, the selected model size, and the model log. The setup's request and startup timeouts can be adjusted in `.env`. |
+
+The [architecture guide](ARCHITECTURE.md) explains how the components connect, how source access works, and where tenant boundaries are applied.

@@ -357,6 +357,66 @@ def review_messages(question, evidence, claims, tenant_id):
             {'role': 'user', 'content': _canonical(payload)}]
 
 
+def review_response_schema(question, evidence, claims, tenant_id):
+    """Constrain local review transport without granting factual authority.
+
+    The same material as the reviewer prompt owns claim IDs and permitted
+    citations. Exact excerpts, reference ordering, source integrity and all
+    acceptance decisions remain the responsibility of bind_review and its
+    consumers. Draft-7 tuple items are supported by llama.cpp b12110; its
+    grammar converter does not reliably support prefixItems.
+    """
+    material = _material(question, evidence, claims, tenant_id)
+
+    def tuple_schema(items):
+        return {'type': 'array', 'items': items, 'additionalItems': False,
+                'minItems': len(items), 'maxItems': len(items)}
+
+    def references(ids, minimum=0):
+        if not ids:
+            return {'const': []}
+        return {'type': 'array', 'items': {'type': 'string', 'enum': list(ids)},
+                'minItems': minimum, 'maxItems': len(ids)}
+
+    reason = {'type': 'string', 'minLength': 1, 'maxLength': 240}
+    sources = {source['id']: source for source in material['sources']}
+    single = all(claim.get('one_ref_required') for claim in material['claims'])
+    if any(bool(claim.get('one_ref_required')) != single for claim in material['claims']):
+        raise ValueError('mixed_review_population')
+    claim_rows = []
+    for claim in material['claims']:
+        allowed = claim['reviewable_references']
+        identity = {'const': claim['id']}
+        unsupported = {'type': 'string', 'enum': ['unsupported', 'unresolved']}
+        alternatives = [tuple_schema(
+            [identity, unsupported, {'const': ''}, {'const': ''}, reason]
+            if single else [identity, unsupported, {'const': []}, reason]
+        )]
+        if allowed:
+            excerpt = {'type': 'string', 'minLength': 3,
+                       'maxLength': max(len(sources[ref]['source_claim']) for ref in allowed)}
+            source_ref = {'type': 'string', 'enum': list(allowed)}
+            if single:
+                supported = [identity, {'const': 'supported'}, source_ref, excerpt, {'const': ''}]
+            else:
+                excerpts = {'type': 'array', 'minItems': 1, 'maxItems': len(allowed),
+                            'items': tuple_schema([source_ref, excerpt])}
+                supported = [identity, {'const': 'supported'}, excerpts, {'const': ''}]
+            alternatives.insert(0, tuple_schema(supported))
+        claim_rows.append({'oneOf': alternatives})
+    eligible = [source['id'] for source in material['sources'] if source['eligible']]
+    coverage = [tuple_schema([
+        {'type': 'string', 'enum': ['partial', 'unresolved']}, references(eligible), reason,
+    ])]
+    if eligible:
+        coverage.insert(0, tuple_schema([
+            {'const': 'complete'}, references(eligible, minimum=1), {'const': ''},
+        ]))
+    return {'$schema': 'http://json-schema.org/draft-07/schema#', 'type': 'object',
+            'properties': {'claims': tuple_schema(claim_rows), 'coverage': {'oneOf': coverage}},
+            'required': ['claims', 'coverage'], 'additionalProperties': False}
+
+
 def _repair_excerpt_array_quotes(text, material):
     """Remove a stray quote only before a verified complete excerpt pair."""
     rows = {source['id']: source for source in material['sources']}

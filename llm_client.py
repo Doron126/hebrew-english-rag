@@ -1,9 +1,9 @@
 """Small, dependency-free client for a loopback llama.cpp server.
 
-Project X owns retrieval, tenant isolation, grounding, and answer validation.
+The application owns retrieval, tenant isolation, grounding, and answer validation.
 The native llama.cpp process owns GGUF loading and token generation. Keeping
 this boundary HTTP-based prevents the Python worker from loading a second copy
-of the 8+ GiB model and lets systemd supervise both runtimes independently.
+of the model and leaves its lifecycle to the selected runtime owner.
 """
 
 from __future__ import annotations
@@ -22,13 +22,13 @@ try:
     from .request_performance import (
         add_tokens,
         record_generation_attempt,
-        timed_stage,
+        timed_generation,
     )
 except ImportError:
     from request_performance import (
         add_tokens,
         record_generation_attempt,
-        timed_stage,
+        timed_generation,
     )
 
 
@@ -193,7 +193,7 @@ class LlamaCppClient:
         )
         timeout = timeout_seconds or self.request_timeout_seconds
         try:
-            with urlopen(request, timeout=timeout) as response:
+            with self._open_request(request, timeout=timeout) as response:
                 raw = response.read(self.max_response_bytes + 1)
                 status = int(getattr(response, "status", 200))
         except HTTPError as exc:
@@ -229,6 +229,10 @@ class LlamaCppClient:
         if status < 200 or status >= 300:
             raise LlamaCppHTTPError(status, f"llama.cpp returned HTTP {status}")
         return decoded
+
+    def _open_request(self, request: Request, *, timeout: float):
+        """Transport hook for runtimes with stricter local-network boundaries."""
+        return urlopen(request, timeout=timeout)
 
     def is_ready(self) -> bool:
         try:
@@ -268,6 +272,8 @@ class LlamaCppClient:
         for message in messages:
             if len(normalized_messages) >= 128:
                 raise LlamaCppProtocolError("too many messages for llama.cpp")
+            if not isinstance(message, dict):
+                raise LlamaCppProtocolError("invalid chat message for llama.cpp")
             role = str(message.get("role") or "").strip()
             content = message.get("content")
             if role not in {"system", "user", "assistant"} or not isinstance(content, str):
@@ -301,7 +307,7 @@ class LlamaCppClient:
             raise LlamaCppProtocolError("llama.cpp returned invalid prompt tokens")
         return len(tokens)
 
-    @timed_stage("answer_generation_ms")
+    @timed_generation
     def chat_completion(
         self,
         *,
@@ -314,6 +320,7 @@ class LlamaCppClient:
         stop: Optional[Iterable[str]] = None,
         seed: Optional[int] = None,
         request_timeout_seconds: Optional[float] = None,
+        response_schema: Optional[Dict[str, Any]] = None,
     ) -> str:
         record_generation_attempt()
         normalized_messages = self._normalize_messages(messages)
@@ -353,6 +360,12 @@ class LlamaCppClient:
             payload["stop"] = stop_values
         if seed is not None and int(seed) >= 0:
             payload["seed"] = int(seed)
+        if response_schema is not None:
+            if not isinstance(response_schema, dict) or not response_schema:
+                raise LlamaCppProtocolError("llama.cpp response schema must be a nonempty object")
+            # Native llama.cpp supports this form directly. The normal request
+            # byte limit still bounds the complete schema and prompt together.
+            payload["response_format"] = {"type": "json_object", "schema": response_schema}
 
         prompt_tokens = self.count_chat_tokens(normalized_messages)
         add_tokens(prompt=prompt_tokens)
@@ -381,11 +394,6 @@ class LlamaCppClient:
         message = choices[0].get("message")
         if not isinstance(message, dict) or not isinstance(message.get("content"), str):
             raise LlamaCppProtocolError("llama.cpp response has no assistant content")
-        finish_reason = choices[0].get("finish_reason")
-        if finish_reason == "length":
-            raise LlamaCppIncompleteError("llama.cpp answer reached its token limit")
-        if finish_reason != "stop":
-            raise LlamaCppProtocolError("llama.cpp returned an unexpected finish reason")
         usage = response.get("usage")
         completion_tokens = (
             usage.get("completion_tokens")
@@ -394,4 +402,17 @@ class LlamaCppClient:
         )
         if type(completion_tokens) is int and completion_tokens >= 0:
             add_tokens(generated=completion_tokens)
+        finish_reason = choices[0].get("finish_reason")
+        if finish_reason == "length":
+            raise LlamaCppIncompleteError(
+                "llama.cpp answer reached its token limit",
+                partial_text=message["content"],
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                finish_reason=finish_reason,
+            )
+        if finish_reason != "stop":
+            raise LlamaCppProtocolError("llama.cpp returned an unexpected finish reason")
+        if not message["content"].strip():
+            raise LlamaCppProtocolError("llama.cpp returned empty assistant content")
         return message["content"].strip()

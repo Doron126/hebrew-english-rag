@@ -1,0 +1,6 @@
+# CPU-only PyTorch for the Python 3.12 / Linux x86_64 installation profile.
+# Run: python -m pip install --no-deps -r requirements-cpu.txt
+# Then: python -m pip install -r requirements.lock.txt
+# The second step installs every dependency at its tested, pinned version.
+--index-url https://download.pytorch.org/whl/cpu
+torch==2.13.0+cpu

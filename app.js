@@ -37,6 +37,7 @@
   const TENANT_ID_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9_-]{0,62}[A-Za-z0-9])?$/;
   const SOURCE_ID_PATTERN = /^[A-Za-z0-9_-]{43}$/;
   const CONVERSATION_ID_PATTERN = /^[A-Za-z0-9_-]{8,64}$/;
+  const SUPPORTED_MODEL_BACKENDS = new Set(["gemma", "llama_cpp"]);
   const frontendPolicy = window.ProjectXFrontendPolicy;
   if (!frontendPolicy) throw new Error("Frontend security policy failed to load.");
 
@@ -77,6 +78,7 @@
     tenantDisplay: document.getElementById("tenant-display"),
     documentInventory: document.getElementById("document-inventory"),
     chatBackend: document.getElementById("chat-backend"),
+    answerModelName: document.getElementById("answer-model-name"),
     modelState: document.getElementById("model-state"),
     modelRetry: document.getElementById("model-retry"),
     settingsOverlay: document.getElementById("settings-overlay"),
@@ -2282,8 +2284,9 @@
     const loaded = data?.loaded === true || data?.model_loaded === true;
     const ready = data?.ready === true || data?.model_ready === true || data?.model_inference_ready === true;
     const unconfirmed = (reportedState === "ready" && (!loaded || !ready)) || (reportedState === "busy" && !loaded);
-    const ownerState = ownerBackend === "gemma" && !unconfirmed ? reportedState : "error";
-    const ownerError = data?.error || data?.model_error || (unconfirmed ? "model_unavailable" : ownerBackend && ownerBackend !== "gemma" ? "unsupported_model" : "");
+    const supportedBackend = SUPPORTED_MODEL_BACKENDS.has(ownerBackend);
+    const ownerState = supportedBackend && !unconfirmed ? reportedState : "error";
+    const ownerError = data?.error || data?.model_error || (unconfirmed ? "model_unavailable" : ownerBackend && !supportedBackend ? "unsupported_model" : "");
     if (modelSelectionIntent?.identity !== connectionIdentity(settings)) modelSelectionIntent = null;
     if (!modelSwitchPending && modelSelectionIntent?.backend === ownerBackend && data?.ready === true) {
       modelSelectionIntent = null;
@@ -2293,7 +2296,11 @@
     const state = mismatch ? (modelSelectionIntent.error ? "error" : "initializing") : ownerState;
     const error = mismatch ? modelSelectionIntent.error : ownerError || modelSelectionIntent?.error || "";
     const admissionFailed = /resource_admission|resource_floor|insufficient|admission.failed/i.test(String(error));
-    const label = "Gemma 4 31B";
+    const reportedModel = data?.selected || data?.selected_model;
+    const label = typeof reportedModel === "string" && reportedModel.trim()
+      ? reportedModel.trim().slice(0, 128)
+      : ownerBackend === "gemma" ? "Gemma 4 31B" : uiText("Local model", "מודל מקומי");
+    if (elements.answerModelName) elements.answerModelName.textContent = label;
     let visualState;
     let statusLabel;
     if (data?.unreachable) {
@@ -2311,13 +2318,13 @@
     } else if (state === "error") {
       visualState = "error";
       statusLabel = /model_start|before_ready|model_identity|model_readiness/.test(String(error))
-        ? uiText("Gemma startup failed", "טעינת Gemma נכשלה")
-        : uiText("Gemma unavailable", "Gemma אינו זמין");
+        ? uiText("Model startup failed", "טעינת המודל נכשלה")
+        : uiText("Model unavailable", "המודל אינו זמין");
     } else {
       visualState = "loading";
       statusLabel = uiText("Loading model…", "טוענים את המודל…");
     }
-    elements.chatBackend.value = "gemma";
+    if (SUPPORTED_MODEL_BACKENDS.has(backend)) elements.chatBackend.value = backend;
     elements.modelState.textContent = statusLabel;
     elements.modelState.dataset.state = visualState;
     elements.modelState.title = label + " · " + statusLabel;
@@ -2344,7 +2351,11 @@
 
   async function switchAnswerModel() {
     if (modelSwitchPending) return;
-    const backend = "gemma";
+    const backend = elements.chatBackend.value;
+    if (!SUPPORTED_MODEL_BACKENDS.has(backend)) {
+      showToast(uiText("Choose a workspace and check the connection first.", "בחרו סביבת עבודה ובדקו את החיבור תחילה."));
+      return;
+    }
     const generation = workspaceGeneration;
     const baseUrl = normalizeApiBaseUrl(settings.apiBaseUrl);
     const tenant = normalizeTenantId(settings.tenantId);
@@ -2373,15 +2384,15 @@
       const data = await readBoundedResponseJson(response);
       if (generation !== workspaceGeneration) return;
       if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : "The selected model could not become ready.");
-      if (data.backend !== "gemma" || data.selected !== "gemma-4-31b" || data.ready !== true || data.loaded !== true) throw new Error("Gemma runtime readiness was not confirmed.");
+      if (data.backend !== backend || typeof data.selected !== "string" || !data.selected || data.ready !== true || data.loaded !== true) throw new Error("Model readiness was not confirmed.");
       renderModelState(data);
-      showToast(uiText("Gemma 4 31B is ready.", "Gemma 4 31B מוכן."));
+      showToast(uiText("The model is ready.", "המודל מוכן."));
     } catch (error) {
       if (generation === workspaceGeneration) {
         const detail = controller.signal.aborted ? "Model switch timed out. Check model status before retrying." : error.message;
         modelSelectionIntent = {backend, identity:connectionIdentity(settings), error:detail};
         renderModelState({backend, state:"error", error:detail});
-        showToast("Gemma is unavailable. Retry when resources are available.");
+        showToast(uiText("The model is unavailable. Check its terminal or log, then retry.", "המודל אינו זמין. בדקו את חלון ההפעלה או את היומן ונסו שוב."));
       }
     } finally {
       window.clearTimeout(timer);
@@ -2414,7 +2425,6 @@
       if (lastConnectionState?.status === "offline") {
         setConnectionStatus("online", "API connected", "Model status endpoint responded.");
       }
-      elements.chatBackend.value = "gemma";
       renderModelState(data);
     } catch (_) {
       if (generation === workspaceGeneration && statusRevision === modelStatusRevision && !modelSwitchPending) {
@@ -2509,16 +2519,18 @@
       updateWorkspaceSummary();
       activeDocumentSourceIds = sourceIds;
       retireStaleSourceState(sourceIds);
-      if (!Array.isArray(data.backend_options) || data.backend_options.length !== 1 || data.backend_options[0] !== "gemma") {
-        throw new Error("Gemma-only model configuration was not confirmed.");
+      if (!Array.isArray(data.backend_options) || data.backend_options.length !== 1 ||
+          !SUPPORTED_MODEL_BACKENDS.has(data.backend_options[0]) ||
+          data.selected_backend !== data.backend_options[0]) {
+        throw new Error("The configured model backend was not confirmed.");
       }
-      elements.chatBackend.value = "gemma";
+      elements.chatBackend.value = data.backend_options[0];
       elements.chatBackend.disabled = modelSwitchPending;
       if (statusRevision === modelStatusRevision) renderModelState(data);
     } catch (error) {
       if (inventoryController === controller && generation === workspaceGeneration) {
         activeDocumentSourceIds = null;
-        renderModelState({backend:"gemma", state:"error", error:"model_configuration_unavailable"});
+        renderModelState({backend:elements.chatBackend.value, state:"error", error:"model_configuration_unavailable"});
         elements.documentInventory.textContent = error?.message || "Active documents could not be loaded.";
       }
     } finally {
@@ -3140,7 +3152,11 @@
       return;
     }
     const controller = new AbortController();
-    const selectedBackend = "gemma";
+    const selectedBackend = elements.chatBackend.value;
+    if (!SUPPORTED_MODEL_BACKENDS.has(selectedBackend)) {
+      showToast(uiText("Choose a workspace and check the connection first.", "בחרו סביבת עבודה ובדקו את החיבור תחילה."));
+      return;
+    }
     const request = {
       controller,
       query,
@@ -3222,8 +3238,8 @@
       if (!data || typeof data.answer !== "string") {
         throw new Error("The server response did not include an answer.");
       }
-      if (data.backend !== "gemma") {
-        throw new Error("The response did not come from the supported Gemma backend.");
+      if (data.backend !== request.backend) {
+        throw new Error("The response did not come from the selected model backend.");
       }
 
       const thread = getThread(threadId);
@@ -3256,7 +3272,7 @@
         answerCompleteness: normalizeAnswerCompleteness(data.answer_completeness),
         responseReasonCodes: normalizePartialReasons(data.response_reason_codes),
         referenceRecovery: data.reference_recovery === "new_search" ? "new_search" : null,
-        backend: "gemma",
+        backend: request.backend,
         retiredCorpus: false,
         createdAt: new Date().toISOString(),
         durationMs: Date.now() - request.startedAt,

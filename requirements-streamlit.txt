@@ -1,0 +1,6 @@
+# Optional Streamlit interface; install the CPU and main runtime files first.
+# Run: python -m pip install -r requirements-streamlit.txt
+# Keep the core runtime at its tested versions while resolving UI dependencies.
+--index-url https://pypi.org/simple
+-c requirements.lock.txt
+streamlit==1.67.0

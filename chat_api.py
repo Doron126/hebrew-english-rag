@@ -556,7 +556,11 @@ CORS_ALLOWED_ORIGINS, CORS_ALLOW_CREDENTIALS, API_DOCS_ENABLED = (
 
 LLM_BACKEND = os.getenv("LLM_BACKEND", "llama_cpp").strip().casefold()
 if LLM_BACKEND != "llama_cpp":
-    raise RuntimeError("Hebrew-English RAG Application supports only supervised Gemma generation (LLM_BACKEND=llama_cpp)")
+    raise RuntimeError("Hebrew-English RAG Application requires LLM_BACKEND=llama_cpp")
+RAG_MODEL_RUNTIME = os.getenv("RAG_MODEL_RUNTIME", "supervised").strip().casefold()
+if RAG_MODEL_RUNTIME not in {"supervised", "llama_cpp"}:
+    raise RuntimeError("RAG_MODEL_RUNTIME must be supervised or llama_cpp")
+MODEL_BACKEND = "llama_cpp" if RAG_MODEL_RUNTIME == "llama_cpp" else "gemma"
 BASE_MODEL = os.getenv(
     "BASE_MODEL",
     "gemma-4-31b",
@@ -7998,7 +8002,20 @@ def _apply_rerank(query: str, hits: List[Dict], pool_k: int, batch_size: int = 1
 # ------------------------------------------------------------
 
 def _load_model():
-    """Create a tenant-bound client; the supervisor alone owns model loading."""
+    """Create a tenant-bound client; the selected process owner loads the model."""
+    if RAG_MODEL_RUNTIME == "llama_cpp":
+        from local_llama_client import LocalLlamaClient
+        if BASE_MODEL != LLAMA_MODEL_ID:
+            raise RuntimeError("BASE_MODEL and LLAMA_MODEL_ID must identify the same local model")
+        client = LocalLlamaClient(
+            base_url=os.getenv("LLAMA_BASE_URL", "http://127.0.0.1:18081"),
+            model_id=LLAMA_MODEL_ID,
+            api_key_file=os.getenv("LLAMA_API_KEY_FILE", ""),
+            request_timeout_seconds=LLAMA_REQUEST_TIMEOUT_SECONDS,
+            context_size_tokens=LLAMA_CONTEXT_SIZE_TOKENS,
+            context_reserve_tokens=LLAMA_CONTEXT_RESERVE_TOKENS,
+        )
+        return client, client
     from gemma_client import GemmaSupervisedClient
     if BASE_MODEL != "gemma-4-31b" or LLAMA_MODEL_ID != "gemma-4-31b":
         raise RuntimeError("Only Gemma 4 31B is an operational generation model")
@@ -8015,7 +8032,7 @@ tokenizer, model = _load_model()
 
 
 def _model_runtime_is_ready() -> bool:
-    """Observe the selected Gemma process without generating or loading."""
+    """Observe the configured model process without generating or loading."""
     return bool(tokenizer is not None and model is not None and model.is_ready())
 
 
@@ -8394,7 +8411,7 @@ class HistoryTurn(BaseModel):
     pages: List[int] = Field(default_factory=list, max_length=8)
 
 class ChatRequest(BaseModel):
-    backend: Optional[Literal["gemma"]] = None
+    backend: Optional[Literal["gemma", "llama_cpp"]] = None
     query: str = Field(min_length=1, max_length=MAX_QUERY_CHARS)
     history: List[HistoryTurn] = Field(default_factory=list)
     # Additive and optional: older clients continue to send only query/history.
@@ -8466,7 +8483,7 @@ class Citation(BaseModel):
     _verified_fact_ids: List[str] = PrivateAttr(default_factory=list)
 
 class ChatResponse(BaseModel):
-    backend: Literal["gemma"] = "gemma"
+    backend: Literal["gemma", "llama_cpp"] = MODEL_BACKEND
     # Compatibility flag: the route's acceptance gate passed. The scope field
     # specifies the narrower meaning for generated workbook overviews.
     answer_verified: bool = Field(default=False, description=(
@@ -10114,7 +10131,7 @@ def _chat_response(**values: Any) -> ChatResponse:
     values["response_reason_codes"] = list(
         getattr(response_decision, "reason_codes", ()) or ()
     )
-    values["backend"] = "gemma"
+    values["backend"] = MODEL_BACKEND
     values["answer_verified"] = response_mode == "answer" and bool(
         getattr(getattr(response_decision, "acceptance_decision", None), "accepted", False)
     )
@@ -10437,11 +10454,11 @@ def _default_tenant_id() -> str:
 
 
 def _wsl_local_client_mode() -> bool:
-    return APP_ENV.strip().casefold() == "wsl" and TENANT_AUTH_MODE == "client"
+    return _is_local_environment(APP_ENV) and TENANT_AUTH_MODE == "client"
 
 
 def _validated_local_allowed_tenants() -> List[str]:
-    """Return the operator-owned WSL allow-list or fail closed."""
+    """Return the operator-owned local allow-list or fail closed."""
     if not LOCAL_ALLOWED_TENANTS:
         raise HTTPException(
             status_code=500,
@@ -10466,7 +10483,7 @@ def _validated_local_allowed_tenants() -> List[str]:
 
 
 def _authorize_local_tenant_selection(requested_value: Optional[str]) -> str:
-    """Authorize WSL client selection solely from operator configuration."""
+    """Authorize local client selection solely from operator configuration."""
     allowed = _validated_local_allowed_tenants()
     if requested_value and requested_value.strip():
         requested = _validated_tenant_id(requested_value)
@@ -10533,7 +10550,7 @@ def get_tenant_id(
 
     if _wsl_local_client_mode():
         # X-Authorized-Tenants is deliberately ignored in local client mode.
-        # Only the root-owned LOCAL_ALLOWED_TENANTS setting grants access.
+        # Only the operator's LOCAL_ALLOWED_TENANTS setting grants access.
         return _authorize_local_tenant_selection(x_tenant_id)
 
     if x_tenant_id:
@@ -12756,6 +12773,7 @@ def _call_llama_cpp_with_capacity(
     max_new_tokens: int,
     do_sample: bool,
     stop_marker: str,
+    response_schema: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Serialize GGUF generation and map the loopback boundary safely."""
     acquired = _GENERATION_SEMAPHORE.acquire(
@@ -12789,6 +12807,7 @@ def _call_llama_cpp_with_capacity(
             repeat_penalty=repeat_penalty,
             stop=[stop_marker],
             seed=LLAMA_SEED,
+            **({"response_schema": response_schema} if response_schema is not None else {}),
         )
     except LlamaCppHTTPError as exc:
         logger.warning("llama.cpp rejected generation status=%d", exc.status_code)
@@ -12960,6 +12979,7 @@ def _run_model_chat(
     trace_role: Optional[str] = None,
     allow_verbatim_non_english: bool = False,
     allow_workbook_source_terms: bool = False,
+    response_schema: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Run the configured backend using the model's own embedded chat template."""
     messages, stop_marker, output_language = _prepare_model_chat_messages(
@@ -12980,6 +13000,8 @@ def _run_model_chat(
                           'answer_language': output_language,
                           'structured_output': bool(structured_output),
                           'outcome': 'started'}
+            if response_schema is not None:
+                trace_call['response_schema'] = response_schema
             recorder.artifact.setdefault('transmitted_model_calls', []).append(trace_call)
             if performance is not None:
                 values = tuple(getattr(performance, name, None) for name in
@@ -12997,6 +13019,7 @@ def _run_model_chat(
                 max_new_tokens=max_new_tokens,
                 do_sample=do_sample,
                 stop_marker=stop_marker,
+                **({"response_schema": response_schema} if response_schema is not None else {}),
             )
         except Exception as exc:
             if trace_call is not None:
@@ -16050,13 +16073,33 @@ def _long_presentation_summary(question, contract, plan, evidence, hebrew, *, pr
         pass
 
     def generate(messages, scope, *, validate=True, reducer_inputs=None):
+        options = {}
+        from passage_synthesis import is_whole_named_source_summary
+        if (RAG_MODEL_RUNTIME == 'llama_cpp' and reducer_inputs is None
+                and is_whole_named_source_summary(scope, require_complete=False)
+                and not getattr(scope, 'overview_synthesis', False)):
+            from local_summary import (literal_summary_response_schema,
+                                       LITERAL_SUMMARY_INSTRUCTION)
+            try:
+                options['response_schema'] = literal_summary_response_schema(scope)
+            except ValueError as exc:
+                if str(exc).endswith('_limit_exceeded'):
+                    raise PromptTooLarge() from exc
+                raise HTTPException(status_code=422,
+                    detail='Re-index the document before requesting its summary.') from exc
+            messages = [dict(message) for message in messages]
+            messages[0]['content'] += '\n\n' + LITERAL_SUMMARY_INSTRUCTION
+            options.update(structured_output=True, trace_role='document_summary')
+            if plan.answer_language is AnswerLanguage.HE:
+                options['allow_workbook_source_terms'] = True
         # The client itself enforces this protocol limit before supervisor
         # admission. Account for the trusted stop instruction appended later.
         if sum(len(message['content']) for message in messages) > 79_000:
             raise PromptTooLarge()
         try:
             raw = _run_model_chat(messages, max_new_tokens=DEFAULT_MAX_NEW_TOKENS,
-                                  do_sample=False, answer_language=plan.answer_language.value)
+                                  do_sample=False, answer_language=plan.answer_language.value,
+                                  **options)
         except HTTPException as exc:
             if isinstance(exc.__cause__, LlamaCppContextLengthError):
                 raise PromptTooLarge() from exc
@@ -16212,7 +16255,7 @@ def _realize_source_passages(*,question,contract,plan,evidence,profile,effective
         if getattr(evidence, 'overview_synthesis', False) and not count_answer:
             from passage_synthesis import workbook_candidate_claims
             from overview_semantic import (review_messages as make_review_messages,
-                                           bind_review)
+                                           review_response_schema, bind_review)
             proposals, _candidate_errors = workbook_candidate_claims(draft, evidence)
             # Review the actual proposed wording, including claims that
             # independently pass deterministic checks. A positive review
@@ -16222,9 +16265,14 @@ def _realize_source_passages(*,question,contract,plan,evidence,profile,effective
                 try:
                     review_messages = make_review_messages(contract.normalized_request, evidence, candidates, effective_tenant)
                     budget = _overview_review_output_budget(review_messages)
+                    review_options = {}
+                    if RAG_MODEL_RUNTIME == 'llama_cpp':
+                        review_options['response_schema'] = review_response_schema(
+                            contract.normalized_request, evidence, candidates, effective_tenant)
                     review_response = _run_model_chat(review_messages, max_new_tokens=budget,
                         do_sample=False, answer_language='en', structured_output=True,
-                        allow_verbatim_non_english=True, trace_role='overview_semantic_review')
+                        allow_verbatim_non_english=True, trace_role='overview_semantic_review',
+                        **review_options)
                     witness = bind_review(contract.normalized_request, evidence, candidates, effective_tenant, review_response)
                     evidence = replace(evidence, overview_question=contract.normalized_request,
                         overview_claims=candidates, overview_review=witness, overview_tenant=effective_tenant)
@@ -22326,9 +22374,10 @@ def _legacy_chat(
     )
 
 
-# The authenticated application and the persistent supervisor share one model.
-def _gemma_allowed_tenants() -> set[str]:
-    configured = os.getenv("PROJECTX_GEMMA_TENANTS", "").split(",")
+# A deployment has one configured generation runtime and model identity.
+def _model_allowed_tenants() -> set[str]:
+    name = "LOCAL_ALLOWED_TENANTS" if RAG_MODEL_RUNTIME == "llama_cpp" else "PROJECTX_GEMMA_TENANTS"
+    configured = os.getenv(name, "").split(",")
     return {value.strip() for value in configured if value.strip()}
 
 
@@ -22336,9 +22385,12 @@ _MODEL_SELECTION_LOCK = threading.Lock()
 
 
 def _model_state_for_tenant(tenant_id):
-    if tenant_id not in _gemma_allowed_tenants():
-        return {"backend": "gemma", "selected": "gemma-4-31b", "ready": False,
-                "loaded": False, "state": "error", "error": "gemma_not_authorized"}
+    if tenant_id not in _model_allowed_tenants():
+        return {"backend": MODEL_BACKEND, "selected": LLAMA_MODEL_ID, "ready": False,
+                "loaded": False, "state": "error",
+                "error": "model_not_authorized" if RAG_MODEL_RUNTIME == "llama_cpp" else "gemma_not_authorized"}
+    if RAG_MODEL_RUNTIME == "llama_cpp":
+        return model.model_status()
     from gemma_app import model_status, GemmaAppError
     try:
         result = dict(model_status(tenant_id=tenant_id))
@@ -22350,7 +22402,7 @@ def _model_state_for_tenant(tenant_id):
 
 
 class ModelSelectionRequest(BaseModel):
-    backend: Literal["gemma"]
+    backend: Literal["gemma", "llama_cpp"]
 
 
 @app.get("/api/model")
@@ -22360,12 +22412,19 @@ def selected_model(tenant_id: str = Depends(get_tenant_id)):
 
 @app.post("/api/model")
 def select_answer_model(req: ModelSelectionRequest, tenant_id: str = Depends(get_tenant_id)):
-    from gemma_app import select_model, GemmaAppError
-    if tenant_id not in _gemma_allowed_tenants():
-        raise HTTPException(status_code=403, detail="Gemma is not enabled for this tenant.")
+    if req.backend != MODEL_BACKEND:
+        raise HTTPException(status_code=400, detail="This backend is not configured for this installation.")
+    if tenant_id not in _model_allowed_tenants():
+        raise HTTPException(status_code=403, detail="The model is not enabled for this tenant.")
     if not _MODEL_SELECTION_LOCK.acquire(timeout=GENERATION_QUEUE_TIMEOUT_SECONDS):
-        raise HTTPException(status_code=503, detail="Gemma is busy. Retry after the active request finishes.")
+        raise HTTPException(status_code=503, detail="The model is busy. Retry after the active request finishes.")
     try:
+        if RAG_MODEL_RUNTIME == "llama_cpp":
+            result = _model_state_for_tenant(tenant_id)
+            if result.get("ready") is not True:
+                raise HTTPException(status_code=503, detail="The local model is unavailable: " + str(result.get("error")))
+            return result
+        from gemma_app import select_model, GemmaAppError
         try:
             result = dict(select_model("gemma", tenant_id=tenant_id))
         except GemmaAppError as exc:
@@ -22383,33 +22442,36 @@ def list_active_documents(tenant_id: str = Depends(get_tenant_id)):
         payload = inventory_documents(_get_chat_retriever(tenant_id), DOCS_BASE_DIR)
     except (InventoryIntegrityError, OSError, ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=503, detail="Document inventory integrity failed.") from exc
-    enabled = tenant_id in _gemma_allowed_tenants()
-    payload["backend_options"] = ["gemma"] if enabled else []
+    enabled = tenant_id in _model_allowed_tenants()
+    payload["backend_options"] = [MODEL_BACKEND] if enabled else []
     state = _model_state_for_tenant(tenant_id)
-    payload["default_backend"] = "gemma"
+    payload["default_backend"] = MODEL_BACKEND
     payload["selected_backend"] = state.get("backend")
     payload["selected_model"] = state.get("selected")
     payload["model_state"] = state.get("state")
     payload["model_loaded"] = state.get("loaded") is True
     payload["model_ready"] = (state.get("ready") is True and payload["model_loaded"]
-                              and state.get("selected") == "gemma-4-31b")
+                              and state.get("selected") == LLAMA_MODEL_ID)
     payload["model_error"] = state.get("error")
     return payload
 
 
 def _dispatch_selected_chat(req, tenant_id, request_performance, cancel_event):
-    from gemma_client import generation_context
+    if RAG_MODEL_RUNTIME == "llama_cpp":
+        from local_llama_client import generation_context
+    else:
+        from gemma_client import generation_context
     if not _MODEL_SELECTION_LOCK.acquire(timeout=GENERATION_QUEUE_TIMEOUT_SECONDS):
-        raise HTTPException(status_code=503, detail="Gemma is busy. Please retry after the active request.")
+        raise HTTPException(status_code=503, detail="The model is busy. Please retry after the active request.")
     try:
         if cancel_event.is_set():
             raise HTTPException(status_code=499, detail="Request cancelled.")
-        if tenant_id not in _gemma_allowed_tenants():
-            raise HTTPException(status_code=403, detail="Gemma is not enabled for this tenant.")
+        if tenant_id not in _model_allowed_tenants():
+            raise HTTPException(status_code=403, detail="The model is not enabled for this tenant.")
         state = _model_state_for_tenant(tenant_id)
-        if (state.get("selected") != "gemma-4-31b" or state.get("ready") is not True
+        if (state.get("selected") != LLAMA_MODEL_ID or state.get("ready") is not True
                 or state.get("loaded") is not True):
-            raise HTTPException(status_code=503, detail="Gemma is unavailable: " + str(state.get("error") or "model_not_ready"))
+            raise HTTPException(status_code=503, detail="The model is unavailable: " + str(state.get("error") or "model_not_ready"))
         # Every planner, resolver and realization call keeps the same authorized
         # tenant/cancellation identity. Common acceptance owns factual answers.
         with generation_context(tenant_id, cancel_event) as generation:
@@ -22419,7 +22481,7 @@ def _dispatch_selected_chat(req, tenant_id, request_performance, cancel_event):
         # Optional planners can catch a model error and continue. Preserve an
         # independently accepted answer, but do not misstate an execution error
         # as a lack of documentary evidence. Later successful generation clears
-        # recoverable errors in the supervised client.
+        # recoverable errors in the generation client.
         failure = generation.last_error
         if failure is not None and response.response_disposition == "ABSTAIN":
             hebrew = _detect_response_language(req.query) == "he"
@@ -22459,8 +22521,10 @@ async def chat(req: ChatRequest, request: Request, tenant_id: str = Depends(get_
     import functools
     from starlette.concurrency import run_in_threadpool
     _validated_chat_query(req)
-    if req.backend == "gemma" and tenant_id not in _gemma_allowed_tenants():
-        raise HTTPException(status_code=403, detail="Gemma is not enabled for this tenant.")
+    if req.backend is not None and req.backend != MODEL_BACKEND:
+        raise HTTPException(status_code=400, detail="This backend is not configured for this installation.")
+    if tenant_id not in _model_allowed_tenants():
+        raise HTTPException(status_code=403, detail="The model is not enabled for this tenant.")
     cancel_event = threading.Event()
     async def watch_disconnect():
         while not cancel_event.is_set():

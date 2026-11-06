@@ -1,23 +1,115 @@
-# Hebrew-English RAG Application
+<div align="center">
 
-Hebrew-English RAG Application is a local document search and question-answering application developed by **Doron Shamo**. It indexes users' documents and can return grounded responses with links to their sources. Its interface and text processing support Hebrew and English.
+<h1>Hebrew-English RAG Application</h1>
 
-Active development has stopped. The application is retained as an **experimental reference implementation**. Parsing coverage, retrieval, and answers have limitations; verify answers against the original documents.
+<p>Search your documents. Ask in Hebrew or English. Follow the answer back to its sources.</p>
 
-**No original tenants, customer documents, or prebuilt indexes are included. Create your own tenants and ingest your own documents.**
+<p>
+  <img src="https://img.shields.io/badge/Languages-Hebrew%20%7C%20English-2563eb?style=flat-square" alt="Hebrew and English">
+  <img src="https://img.shields.io/badge/Retrieval-Semantic%20%2B%20Lexical-0f766e?style=flat-square" alt="Semantic and lexical retrieval">
+  <img src="https://img.shields.io/badge/Answers-Source%20citations-7c3aed?style=flat-square" alt="Answers with source citations">
+</p>
 
-The code provides a browser interface, a Python/FastAPI backend, document extraction and indexing into Chroma, multilingual embeddings, and a separate local Gemma model supervisor. The installation is based on Ubuntu 26.04 under WSL and Python 3.14.4. Other environments are not established by this publication.
+<p>
+  <a href="#how-it-works">How it works</a> ·
+  <a href="#features">Features</a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="docs/INSTALLATION.md">Installation</a> ·
+  <a href="docs/ARCHITECTURE.md">Architecture</a>
+</p>
 
-**Current installation limitation:** the model supervisor is bound to a specific historical WSL runtime profile and cannot be configured for arbitrary model paths or a separately running endpoint. A fresh checkout can prepare data and use the ingestion pipeline, but this publication does not provide a verified portable model-startup path or an end-to-end first answer. See the [installation guide](docs/INSTALLATION.md) before starting.
+</div>
 
-## Getting started
+Hebrew-English RAG Application is a local workspace for searching files, asking questions, and reviewing the evidence behind an answer. It combines a bilingual browser interface, document ingestion, semantic and keyword retrieval, and a local language model.
 
-With authorized access to this private repository, clone it and follow [installation and first use](docs/INSTALLATION.md). That guide covers prerequisites, an isolated data directory, user-defined tenant configuration, document ingestion and the model limitation. See [architecture](docs/ARCHITECTURE.md) for components, data flow and tenant boundaries.
+You create your own knowledge bases and add your own documents. Each knowledge base has a tenant ID that keeps its index, source files, and conversation context separate. The repository starts with no tenants, documents, or prebuilt indexes.
 
-The documented interface is the FastAPI-served browser application. `webui_streamlit.py` is retained as a legacy reference only; Streamlit is not included in the supported dependency lock, and that alternative interface is not part of the installation walkthrough.
+## How it works
 
-Source revision used for this publication: `c015ec4c62b68ba051e7eaa421c01d80935a9469`.
+```mermaid
+flowchart TD
+  D["Your documents"] --> I["Extract and embed"]
+  I --> V[("Tenant index")]
+  B["Browser chat"] --> A["FastAPI: retrieve and answer"]
+  A <--> V
+  A <--> M["Local language model"]
+  A -->|"Answer and citations"| B
+  A -->|"Open original source"| D
+```
+
+Ingestion turns documents into searchable passages with source metadata. For each question, the backend retrieves evidence from the selected knowledge base and returns an answer with its source references. See the [architecture guide](docs/ARCHITECTURE.md) for the components, data flow, and tenant boundaries.
+
+## Features
+
+| Feature | What you can do |
+|---|---|
+| **Hebrew and English** | Switch the interface between Hebrew and English, with right-to-left and left-to-right layouts. Ask questions in either language. |
+| **Document chat** | Ask for summaries, compare sources, find a figure or date, and continue with follow-up questions. |
+| **Source citations** | Review the evidence attached to an answer and open the corresponding original document. |
+| **Hybrid retrieval** | Search with multilingual embeddings and lexical matching, with optional reranking. |
+| **Document ingestion** | Index PDFs, DOCX, XLSX, PPTX, text, Markdown, and structured text files. Add Tesseract for scanned documents and image OCR. |
+| **Your own knowledge bases** | Configure separate document collections and select the one you want to query in the browser. |
+
+## Quick start
+
+Use **Linux x86-64 (including WSL2), Python 3.12, llama-server b12110, and an instruction-tuned GGUF model**. The [full installation guide](docs/INSTALLATION.md) includes the model download and server build if you are starting from scratch.
+
+### 1. Install
+
+```bash
+git clone https://github.com/Doron126/hebrew-english-rag.git
+cd hebrew-english-rag
+python3.12 -m venv .venv
+. .venv/bin/activate
+python -m pip install --no-deps -r requirements-cpu.txt
+python -m pip install -r requirements.lock.txt
+```
+
+### 2. Configure your workspace
+
+Replace the two model paths with your local files:
+
+```bash
+python manage.py init \
+  --llama-server "/absolute/path/to/llama-server" \
+  --model "/absolute/path/to/instruction-model.gguf" \
+  --data-dir "$HOME/hebrew-english-rag-data" \
+  --embedding-model intfloat/multilingual-e5-small
+
+python manage.py tenant add my-documents --name "My documents"
+```
+
+The setup creates local configuration and prints your new document directory. Copy your own files into `~/hebrew-english-rag-data/documents/my-documents/`. You can choose a different tenant ID and display name.
+
+### 3. Index and start
+
+```bash
+python manage.py ingest --tenant my-documents
+python manage.py doctor
+python manage.py serve
+```
+
+Open **[http://127.0.0.1:18080](http://127.0.0.1:18080)** and select **My documents** in Settings. The launcher starts the local model and the web application together. Press **Ctrl+C** to stop them; your files and index remain available for the next session.
+
+## Working with your documents
+
+Choose a knowledge base in **Settings** and begin with a summary that names an indexed file, including its extension. Replace the example filenames below with your own exact filenames:
+
+| English | עברית |
+|---|---|
+| Summarize report.pdf. | סכם את report.pdf. |
+| What are the main findings in report.pdf? | מהם הממצאים המרכזיים בקובץ report.pdf? |
+| Compare report.pdf and update.pdf, citing both files. | השווה בין report.pdf לבין update.pdf והוסף הפניות לשני הקבצים. |
+
+Use follow-up questions to narrow the scope. Open a source citation to review the original context, or export the conversation as Markdown to keep your notes.
+
+## Documentation
+
+| Guide | Contents |
+|---|---|
+| [Installation and first use](docs/INSTALLATION.md) | Requirements, model setup, your first tenant, ingestion, startup, and troubleshooting |
+| [Architecture](docs/ARCHITECTURE.md) | Components, retrieval and generation, source access, and persistence |
 
 ## Author
 
-Doron Shamo
+Created by **Doron Shamo**.

@@ -3058,7 +3058,7 @@ def complete_workbook_qualifications(answer, evidence, hebrew):
 
 def is_whole_named_source_summary(evidence, *, require_complete=True):
     """Identify an unqualified summary of a fully read, named source."""
-    from document_reading import SourceSummaryEvidence
+    from document_reading import SourceSummaryEvidence, unqualified_whole_summary
     if not isinstance(evidence, SourceSummaryEvidence):
         return False
     reference = getattr(evidence, 'reference', None)
@@ -3066,8 +3066,7 @@ def is_whole_named_source_summary(evidence, *, require_complete=True):
             or require_complete and getattr(evidence, 'complete', False) is not True
             or getattr(evidence, 'summary_topic', '')):
         return False
-    request = str(getattr(evidence, 'summary_request', '') or '').strip(' \t\r\n.,;:?!')
-    return bool(re.fullmatch(r'(?:(?:את|the)\s+)?(?:ה?מסמך|ה?קובץ|document|file)?', request, re.I))
+    return unqualified_whole_summary(reference, getattr(evidence, 'summary_request', ''))
 
 
 def is_whole_source_summary(evidence, *, require_complete=True):

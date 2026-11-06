@@ -43,7 +43,7 @@
     ["label[for=tenant-id]", "Knowledge-base ID", "מזהה מאגר המסמכים"],
     ["#tenant-help", "Leave blank only when the backend has a configured default.", "ניתן להשאיר ריק אם מוגדר מאגר ברירת מחדל בשירות."],
     ["label[for=request-timeout-seconds]", "Answer timeout", "זמן המתנה לתשובה"],
-    ["#request-timeout-help", "Gemma: up to 60 minutes. Stop ends the wait in this browser; the server may still finish processing. Retrying is always explicit.", "Gemma: עד 60 דקות. עצירה מסיימת את ההמתנה בדפדפן; ייתכן שהשרת עדיין מסיים לעבד את הבקשה. ניסיון נוסף מתבצע רק ביוזמתכם."],
+    ["#request-timeout-help", "Model requests can take up to 60 minutes. Stop ends the wait in this browser; the server may still finish processing. Retrying is always explicit.", "בקשות למודל עשויות להימשך עד 60 דקות. עצירה מסיימת את ההמתנה בדפדפן; ייתכן שהשרת עדיין מסיים לעבד את הבקשה. ניסיון נוסף מתבצע רק ביוזמתכם."],
     [".theme-row .field-label", "Appearance", "תצוגה"],
     [".theme-row .field-help", "Switch between light and dark themes.", "מעבר בין תצוגה בהירה לכהה."],
     ["label[for=processing-motion]", "Processing indicator", "סימן עיבוד"],

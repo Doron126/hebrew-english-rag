@@ -1,21 +1,22 @@
-# Resolve and lock these direct requirements on Ubuntu 26.04 / Python 3.14.
-# The GGUF language model is served by the separately pinned llama.cpp binary;
-# no llama-cpp-python, bitsandbytes, PEFT, or OpenAI SDK is required.
+# Direct runtime dependencies for Python 3.12 on Linux x86_64 / WSL2.
+# Install the published profile with requirements-cpu.txt (--no-deps), then
+# requirements.lock.txt. The lock supplies all transitive dependencies.
+# The GGUF language model is served by the separate llama.cpp executable.
 fastapi
 uvicorn[standard]
 pydantic
+starlette
 chromadb
 sentence-transformers
 numpy
-torch
+torch==2.13.0+cpu
 transformers
 pypdf
 PyMuPDF
 Pillow
 pytesseract
-# Runtime schema validation, HTTP requests and tabular/text processing.
+# Runtime schema validation and HTTP requests.
 jsonschema
 requests
-pandas
-sacrebleu
-rouge-score
+# Support embedding-model downloads when the environment uses a SOCKS proxy.
+httpx[socks]
