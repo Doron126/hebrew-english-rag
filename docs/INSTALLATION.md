@@ -16,7 +16,7 @@ This guide sets up the application on Linux x86-64, including Ubuntu under WSL2.
 
 Model file size is only part of the memory requirement. Embeddings and retrieval use system RAM even when generation is offloaded to a GPU. Choose model size and GPU layer settings for the memory available on your machine.
 
-The examples below use Ubuntu package commands. Run them in the Linux shell. Access to the private GitHub repository is required while its visibility remains private.
+The examples below use Ubuntu package commands. Run them in the Linux shell.
 
 ## 1. Install the application
 

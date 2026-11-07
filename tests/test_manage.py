@@ -6,6 +6,7 @@ import io
 import os
 from pathlib import Path
 import signal
+import socket
 import subprocess
 import tempfile
 import unittest
@@ -179,6 +180,22 @@ class LocalSetupTests(unittest.TestCase):
               self.assertRaises(manage.SetupError)):
             manage.wait_for_model(process, values)
         self.assertEqual(destinations, ["127.0.0.1:18081"])
+
+    def test_port_check_accepts_time_wait_but_rejects_a_listener(self):
+        # Uvicorn's listening socket permits reuse after its active close.
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
+            server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            server.bind(("127.0.0.1", 0))
+            port = server.getsockname()[1]
+            server.listen()
+            self.assertFalse(manage.port_available(port))
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client:
+                client.settimeout(5)
+                client.connect(("127.0.0.1", port))
+                with server.accept()[0] as connection:
+                    connection.shutdown(socket.SHUT_WR)
+                    self.assertEqual(client.recv(1), b"")
+        self.assertTrue(manage.port_available(port))
 
     def test_shutdown_race_still_reaps_both_children(self):
         self.initialize()

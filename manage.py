@@ -328,7 +328,11 @@ def command_doctor(args: argparse.Namespace) -> int:
 def port_available(port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
         try:
+            # Match the server's restart behavior: completed connections in
+            # TIME_WAIT must not be mistaken for a live listening process.
+            listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             listener.bind(("127.0.0.1", port))
+            listener.listen(1)
         except OSError:
             return False
     return True
